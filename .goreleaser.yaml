@@ -30,7 +30,7 @@ builds:
         goarch: arm64
         env:
           - CGO_ENABLED=1
-          - CC=zig cc -target aarch64-linux-musl
+          - CC=aarch64-linux-gnu-gcc
       - goos: windows
         goarch: amd64
         env:
@@ -67,17 +67,4 @@ release:
   draft: false
   prerelease: auto
 
-brews:
-  - name: goo
-    repository:
-      owner: kingjethro999
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/kingjethro999/Goo-CLI"
-    description: "Context-aware AI CLI assistant for your terminal"
-    license: "MIT"
-    install: |
-      bin.install "goo"
-      man1.install Dir["man/*.1"]
-    test: |
-      system "#{bin}/goo version"
+
