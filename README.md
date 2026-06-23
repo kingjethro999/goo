@@ -12,7 +12,7 @@ Goo is a terminal-first AI assistant built with Go. It is not a chatbot wrapper 
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.sh | bash
 ```
 
 Or download binary releases from the GitHub Releases page.
