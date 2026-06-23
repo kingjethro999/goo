@@ -47,3 +47,12 @@ setup:
 # Database migrations
 db-migrate:
 	sqlite3 ~/.config/goo/history.db < memory/schema.sql
+
+man:
+	go run . docs
+	@echo "Man pages written to ./man/"
+
+install-man: man
+	install -d /usr/local/share/man/man1
+	install -m 644 man/goo*.1 /usr/local/share/man/man1/
+	mandb 2>/dev/null || true

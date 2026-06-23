@@ -1,0 +1,39 @@
+# Binaries
+/bin/
+/dist/
+goo
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# Temporary files
+tmp/
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Coverage
+coverage.out
+coverage.html
+keys.md
