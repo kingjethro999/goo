@@ -9,8 +9,6 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/spf13/cobra v1.8.0
-	golang.org/x/crypto v0.27.0
-	golang.org/x/term v0.24.0
 )
 
 require (
