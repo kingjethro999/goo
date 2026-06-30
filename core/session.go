@@ -15,6 +15,8 @@ import (
 	"github.com/kingjethro999/goo/tools/github"
 	"github.com/kingjethro999/goo/tools/search"
 	"github.com/kingjethro999/goo/tools/tasks"
+	"github.com/muesli/reflow/wordwrap"
+	"golang.org/x/term"
 )
 
 // RunChatSession starts and manages an interactive chat session using the Bubbletea TUI.
@@ -83,7 +85,13 @@ func RunAskOnce(question string, store *memory.Store) error {
 
 	// Stream directly to stdout so the user sees the response in real time
 	var buf strings.Builder
-	w := io.MultiWriter(os.Stdout, &buf)
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		width = w
+	}
+	ww := wordwrap.NewWriter(width - 4) // leaves margin
+	defer ww.Close()
+	w := io.MultiWriter(ww, &buf)
 	if err := groqClient.StreamChat(context.Background(), messages, w); err != nil {
 		return fmt.Errorf("AI error: %w", err)
 	}

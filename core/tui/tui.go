@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kingjethro999/goo/memory"
 	"github.com/kingjethro999/goo/tools/ai"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 // Available models to cycle through with Tab
@@ -281,33 +282,34 @@ func (m *Model) updateViewport() {
 	wrapStyle := lipgloss.NewStyle().Width(m.viewport.Width)
 
 	for _, msg := range m.messages {
+		content := wordwrap.String(msg.Content, m.viewport.Width-4)
 		switch msg.Role {
 		case "user":
 			sb.WriteString(styleUser.Render("YOU"))
 			sb.WriteByte('\n')
-			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString(wrapStyle.Render(content))
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(styleAssistant.Render("GOO"))
 			sb.WriteByte('\n')
-			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString(wrapStyle.Render(content))
 			sb.WriteString("\n\n")
 		case "system":
-			sb.WriteString(styleSystem.Render("  " + wrapStyle.Render(msg.Content)))
+			sb.WriteString(styleSystem.Render("  " + wrapStyle.Render(content)))
 			sb.WriteString("\n\n")
 		case "tool_call":
-			sb.WriteString(styleToolCall.Render("  " + wrapStyle.Render(msg.Content)))
+			sb.WriteString(styleToolCall.Render("  " + wrapStyle.Render(content)))
 			sb.WriteString("\n")
 		case "tool_result":
-			sb.WriteString(styleToolOk.Render("  " + wrapStyle.Render(msg.Content)))
+			sb.WriteString(styleToolOk.Render("  " + wrapStyle.Render(content)))
 			sb.WriteString("\n\n")
 		case "error":
-			sb.WriteString(styleError.Render("  ✖  Error: " + wrapStyle.Render(msg.Content)))
+			sb.WriteString(styleError.Render("  ✖  Error: " + wrapStyle.Render(content)))
 			sb.WriteString("\n\n")
 		default:
 			sb.WriteString(styleSystem.Render(strings.ToUpper(msg.Role)))
 			sb.WriteByte('\n')
-			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString(wrapStyle.Render(content))
 			sb.WriteString("\n\n")
 		}
 	}

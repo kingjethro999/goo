@@ -53,6 +53,8 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.sh | bash
 ```
+> **Note:** After installation, you may need to restart your terminal or refresh your path (e.g., `source ~/.bashrc` or `source ~/.zshrc`) for the `goo` command to be recognized.
+
 
 **Manual download:**
 Download the pre-built binary for your platform from the [Releases page](https://github.com/kingjethro999/goo/releases).
