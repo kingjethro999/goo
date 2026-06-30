@@ -22,6 +22,19 @@ type Issue struct {
 	HTMLURL string `json:"html_url"`
 }
 
+// Repo holds basic repository info.
+type Repo struct {
+	Name        string `json:"name"`
+	FullName    string `json:"full_name"`
+	Description string `json:"description"`
+	HTMLURL     string `json:"html_url"`
+	Language    string `json:"language"`
+	Stars       int    `json:"stargazers_count"`
+	Forks       int    `json:"forks_count"`
+	Private     bool   `json:"private"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 // GetMyPRs returns open pull requests authored by the configured user.
 // If repo is empty, searches across all repos the user has access to.
 func (c *Client) GetMyPRs(repo string) ([]PullRequest, error) {
@@ -49,4 +62,26 @@ func (c *Client) GetMyPRs(repo string) ([]PullRequest, error) {
 		return nil, err
 	}
 	return result.Items, nil
+}
+
+// GetRepos returns public repos for the given username, sorted by last updated.
+func (c *Client) GetRepos(username string, limit int) ([]Repo, error) {
+	if username == "" {
+		var me struct {
+			Login string `json:"login"`
+		}
+		if err := c.get("/user", &me); err != nil {
+			return nil, fmt.Errorf("could not determine GitHub user: %w", err)
+		}
+		username = me.Login
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	path := fmt.Sprintf("/users/%s/repos?sort=updated&direction=desc&per_page=%d", username, limit)
+	var repos []Repo
+	if err := c.get(path, &repos); err != nil {
+		return nil, err
+	}
+	return repos, nil
 }

@@ -15,6 +15,15 @@ import (
 	"github.com/kingjethro999/goo/tools/ai"
 )
 
+// Available models to cycle through with Tab
+var availableModels = []string{
+	"llama-3.3-70b-versatile",
+	"llama-3.1-70b-versatile",
+	"llama3-groq-70b-8192-tool-use-preview",
+	"mixtral-8x7b-32768",
+	"gemma2-9b-it",
+}
+
 var (
 	styleHeader    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).PaddingLeft(1)
 	styleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -23,6 +32,10 @@ var (
 	styleSystem    = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("244"))
 	styleError     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
 	styleStatus    = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	styleHint      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleModel     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	styleToolOk    = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
+	styleToolCall  = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 )
 
 type DisplayMessage struct {
@@ -31,20 +44,24 @@ type DisplayMessage struct {
 }
 
 type Model struct {
-	session    *memory.Session
-	store      *memory.Store
-	groq       *ai.GroqClient
-	ctx        *memory.ContextBuilder
-	viewport   viewport.Model
-	input      textarea.Model
-	spinner    spinner.Model
-	messages   []DisplayMessage
-	width      int
-	height     int
-	status     string // "idle" | "streaming" | "tool_execution"
-	err        error
-	tools      []ai.Tool
-	dispatcher func(*ai.ToolCall) (string, error)
+	session      *memory.Session
+	store        *memory.Store
+	groq         *ai.GroqClient
+	ctx          *memory.ContextBuilder
+	viewport     viewport.Model
+	input        textarea.Model
+	spinner      spinner.Model
+	messages     []DisplayMessage
+	width        int
+	height       int
+	status       string // "idle" | "streaming" | "tool_execution"
+	err          error
+	tools        []ai.Tool
+	dispatcher   func(*ai.ToolCall) (string, error)
+	modelIndex   int
+	inputHistory []string
+	historyPos   int
+	savedDraft   string
 }
 
 // Message types for the tea update loop
@@ -61,11 +78,10 @@ type ToolResultMsg struct {
 	Name   string
 }
 
-// New creates a new TUI model wired to the given session, store, Groq client,
-// tool definitions and dispatcher function.
+// New creates a new TUI model.
 func New(session *memory.Session, store *memory.Store, groq *ai.GroqClient, tools []ai.Tool, dispatcher func(*ai.ToolCall) (string, error)) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message… (Enter to send, Alt+Enter for newline)"
+	ta.Placeholder = "Type a message…"
 	ta.Focus()
 	ta.Prompt = "┃ "
 	ta.CharLimit = 10000
@@ -73,7 +89,7 @@ func New(session *memory.Session, store *memory.Store, groq *ai.GroqClient, tool
 	ta.ShowLineNumbers = false
 
 	vp := viewport.New(80, 20)
-	vp.SetContent(styleSystem.Render("Goo is ready. Start typing to begin a conversation."))
+	vp.SetContent(styleSystem.Render("  Goo is ready. Start typing below.\n  Shift+Enter = newline  ·  Tab = cycle model  ·  ↑↓ = history"))
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -90,6 +106,7 @@ func New(session *memory.Session, store *memory.Store, groq *ai.GroqClient, tool
 		status:     "idle",
 		tools:      tools,
 		dispatcher: dispatcher,
+		historyPos: -1,
 	}
 }
 
@@ -106,14 +123,58 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
+
 		case tea.KeyEsc:
-			// Esc only quits when input is empty to avoid losing text accidentally
 			if m.input.Value() == "" {
 				return m, tea.Quit
 			}
+
+		case tea.KeyTab:
+			// Cycle through models
+			if m.status == "idle" {
+				m.modelIndex = (m.modelIndex + 1) % len(availableModels)
+				m.groq.SetModel(availableModels[m.modelIndex])
+				m.messages = append(m.messages, DisplayMessage{
+					Role:    "system",
+					Content: fmt.Sprintf("⟳ Model switched to: %s", availableModels[m.modelIndex]),
+				})
+				m.updateViewport()
+			}
+			return m, nil
+
+		case tea.KeyUp:
+			// Navigate input history (only when idle and cursor is at top)
+			if m.status == "idle" && len(m.inputHistory) > 0 {
+				if m.historyPos == -1 {
+					m.savedDraft = m.input.Value()
+				}
+				next := m.historyPos + 1
+				if next < len(m.inputHistory) {
+					m.historyPos = next
+					m.input.SetValue(m.inputHistory[len(m.inputHistory)-1-m.historyPos])
+				}
+				return m, nil
+			}
+
+		case tea.KeyDown:
+			// Navigate input history downward
+			if m.status == "idle" && m.historyPos > -1 {
+				m.historyPos--
+				if m.historyPos == -1 {
+					m.input.SetValue(m.savedDraft)
+				} else {
+					m.input.SetValue(m.inputHistory[len(m.inputHistory)-1-m.historyPos])
+				}
+				return m, nil
+			}
+
 		case tea.KeyEnter:
-			// Alt+Enter inserts a newline; plain Enter submits
+			// Shift+Enter inserts a newline; plain Enter submits
 			if msg.Alt {
+				// Alt+Enter also inserts newline for compatibility
+				break
+			}
+			if strings.Contains(msg.String(), "shift") {
 				break
 			}
 			v := strings.TrimSpace(m.input.Value())
@@ -121,6 +182,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
+			m.historyPos = -1
+			m.savedDraft = ""
+			// Add to history (avoid duplicates at top)
+			if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != v {
+				m.inputHistory = append(m.inputHistory, v)
+				if len(m.inputHistory) > 100 {
+					m.inputHistory = m.inputHistory[1:]
+				}
+			}
 			m.status = "streaming"
 			m.messages = append(m.messages, DisplayMessage{Role: "user", Content: v})
 			m.updateViewport()
@@ -147,8 +217,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ToolCallMsg:
 		m.status = "tool_execution"
 		m.messages = append(m.messages, DisplayMessage{
-			Role:    "system",
-			Content: fmt.Sprintf("⚙ Calling tool: %s", msg.Call.Name),
+			Role:    "tool_call",
+			Content: fmt.Sprintf("⚙  Calling: %s", msg.Call.Name),
 		})
 		m.updateViewport()
 
@@ -161,25 +231,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case ToolResultMsg:
-		// Save the tool call message and the tool result message to the store
-		callMsg := memory.Message{Role: "assistant", ToolCallID: msg.CallID, Content: fmt.Sprintf("(called %s)", msg.Name), SessionID: m.session.ID}
-		resMsg := memory.Message{Role: "tool", ToolCallID: msg.CallID, Content: msg.Result, SessionID: m.session.ID}
+		callMsg := memory.Message{Role: "assistant", ToolCallID: msg.CallID, ToolName: msg.Name, Content: "", SessionID: m.session.ID}
+		resMsg := memory.Message{Role: "tool", ToolCallID: msg.CallID, ToolName: msg.Name, Content: msg.Result, SessionID: m.session.ID}
 		m.saveMessage(callMsg)
 		m.saveMessage(resMsg)
 		m.messages = append(m.messages, DisplayMessage{
-			Role:    "system",
-			Content: fmt.Sprintf("✔ %s returned: %s", msg.Name, truncate(msg.Result, 120)),
+			Role:    "tool_result",
+			Content: fmt.Sprintf("✔  %s → %s", msg.Name, truncate(msg.Result, 200)),
 		})
 		m.updateViewport()
 		m.status = "streaming"
-		// Stream the follow-up after injecting tool results into context
-		messages := m.ctx.Build("")
+		messages := m.ctx.BuildFollowUp()
 		return m, streamCmd(m.groq, messages, m.tools)
 
 	case StreamErrMsg:
 		m.status = "idle"
 		m.err = msg.Err
-		m.messages = append(m.messages, DisplayMessage{Role: "error", Content: "Error: " + msg.Err.Error()})
+		m.messages = append(m.messages, DisplayMessage{Role: "error", Content: msg.Err.Error()})
 		m.updateViewport()
 		return m, nil
 
@@ -187,7 +255,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		headerH := 2
-		footerH := 5
+		footerH := 6
 		m.viewport.Width = msg.Width
 		m.viewport.Height = msg.Height - headerH - footerH
 		m.input.SetWidth(msg.Width)
@@ -210,32 +278,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateViewport() {
 	var sb strings.Builder
+	wrapStyle := lipgloss.NewStyle().Width(m.viewport.Width)
+
 	for _, msg := range m.messages {
-		var label string
-		var content string
 		switch msg.Role {
 		case "user":
-			label = styleUser.Render("YOU")
-			content = msg.Content
+			sb.WriteString(styleUser.Render("YOU"))
+			sb.WriteByte('\n')
+			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString("\n\n")
 		case "assistant":
-			label = styleAssistant.Render("GOO")
-			content = msg.Content
+			sb.WriteString(styleAssistant.Render("GOO"))
+			sb.WriteByte('\n')
+			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString("\n\n")
 		case "system":
-			sb.WriteString(styleSystem.Render("  ", msg.Content))
+			sb.WriteString(styleSystem.Render("  " + wrapStyle.Render(msg.Content)))
 			sb.WriteString("\n\n")
-			continue
+		case "tool_call":
+			sb.WriteString(styleToolCall.Render("  " + wrapStyle.Render(msg.Content)))
+			sb.WriteString("\n")
+		case "tool_result":
+			sb.WriteString(styleToolOk.Render("  " + wrapStyle.Render(msg.Content)))
+			sb.WriteString("\n\n")
 		case "error":
-			sb.WriteString(styleError.Render("  ✖ ", msg.Content))
+			sb.WriteString(styleError.Render("  ✖  Error: " + wrapStyle.Render(msg.Content)))
 			sb.WriteString("\n\n")
-			continue
 		default:
-			label = styleSystem.Render(strings.ToUpper(msg.Role))
-			content = msg.Content
+			sb.WriteString(styleSystem.Render(strings.ToUpper(msg.Role)))
+			sb.WriteByte('\n')
+			sb.WriteString(wrapStyle.Render(msg.Content))
+			sb.WriteString("\n\n")
 		}
-		sb.WriteString(label)
-		sb.WriteByte('\n')
-		sb.WriteString(content)
-		sb.WriteString("\n\n")
 	}
 	m.viewport.SetContent(sb.String())
 	m.viewport.GotoBottom()
@@ -255,11 +329,18 @@ func (m *Model) saveMessage(msg memory.Message) {
 func (m *Model) View() string {
 	var b strings.Builder
 
-	title := fmt.Sprintf("Goo  ·  session %s", m.session.ID[:8])
-	if m.session.Title != "" && m.session.Title != "New Chat" {
-		title = fmt.Sprintf("Goo  ·  %s", m.session.Title)
+	model := availableModels[m.modelIndex]
+	if m.groq != nil {
+		model = m.groq.Model()
 	}
-	fmt.Fprintf(&b, "%s\n", styleHeader.Render(title))
+
+	title := fmt.Sprintf(" Goo  ·  session %s", m.session.ID[:8])
+	if m.session.Title != "" && m.session.Title != "New Chat" {
+		title = fmt.Sprintf(" Goo  ·  %s", m.session.Title)
+	}
+	modelTag := styleModel.Render("  [" + shortModelName(model) + "]")
+	header := styleHeader.Render(title) + modelTag
+	fmt.Fprintf(&b, "%s\n", header)
 	fmt.Fprintf(&b, "%s\n", styleSeparator.Render(strings.Repeat("─", m.width)))
 	fmt.Fprintf(&b, "%s\n", m.viewport.View())
 	fmt.Fprintf(&b, "%s\n", styleSeparator.Render(strings.Repeat("─", m.width)))
@@ -269,17 +350,33 @@ func (m *Model) View() string {
 		if m.status == "tool_execution" {
 			label = "Running tool"
 		}
-		fmt.Fprintf(&b, "%s\n", styleStatus.Render(fmt.Sprintf(" %s %s…", m.spinner.View(), label)))
+		fmt.Fprintf(&b, "%s\n", styleStatus.Render(fmt.Sprintf("  %s %s…", m.spinner.View(), label)))
 	} else {
-		fmt.Fprintf(&b, "%s\n", styleSystem.Render(" Ctrl+C to quit  ·  Alt+Enter for newline"))
+		hint := styleHint.Render("  Enter=send  Shift+Enter=newline  Tab=model  ↑↓=history  Ctrl+C=quit")
+		fmt.Fprintf(&b, "%s\n", hint)
 	}
 
 	b.WriteString(m.input.View())
 	return b.String()
 }
 
-// writerAdapter pipes streaming text chunks into a buffered channel so they
-// can be forwarded to the tea update loop one-by-one.
+// shortModelName trims verbose model names for the status bar.
+func shortModelName(model string) string {
+	replacer := strings.NewReplacer(
+		"llama-3.3-70b-versatile", "llama3.3-70b",
+		"llama-3.1-70b-versatile", "llama3.1-70b",
+		"llama3-groq-70b-8192-tool-use-preview", "llama3-tool-70b",
+		"mixtral-8x7b-32768", "mixtral-8x7b",
+		"gemma2-9b-it", "gemma2-9b",
+		"gpt-4o", "gpt-4o",
+		"gpt-4o-mini", "gpt-4o-mini",
+		"claude-3-5-sonnet-20241022", "claude-3.5-sonnet",
+		"deepseek-chat", "deepseek-chat",
+	)
+	return replacer.Replace(model)
+}
+
+// writerAdapter pipes streaming text chunks into a buffered channel.
 type writerAdapter struct {
 	chunks chan<- string
 }
@@ -289,8 +386,7 @@ func (w *writerAdapter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// streamCmd starts the Groq streaming request in a goroutine and returns the
-// first tea.Cmd in a recursive chain that drains one chunk per update tick.
+// streamCmd starts the Groq streaming request in a goroutine.
 func streamCmd(groq *ai.GroqClient, messages []memory.Message, tools []ai.Tool) tea.Cmd {
 	chunks := make(chan string, 100)
 	errs := make(chan error, 1)

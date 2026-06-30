@@ -11,90 +11,62 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
-
-	"golang.org/x/crypto/argon2"
-	"golang.org/x/term"
 )
 
-var (
-	sessionKey     []byte
-	sessionKeyOnce sync.Once
-	sessionKeyMu   sync.Mutex
-)
-
-// GetAPIKey decrypts and returns an API key by slot name.
+// GetAPIKey returns a key by slot. Priority:
+//  1. User's personal key — decrypted automatically using the machine key (no passphrase)
+//  2. Baked-in fallback key — available to all users out of the box
 func GetAPIKey(slot string) (string, error) {
-	key, err := getOrDeriveSessionKey()
-	if err == nil {
-		if val, err := loadAndDecryptKey(slot, key); err == nil {
-			return val, nil
+	// Try user's personal key first (zero-friction — machine key auto-decrypts)
+	if HasKey(slot) {
+		mk, err := loadOrCreateMachineKey()
+		if err == nil {
+			if val, err := loadAndDecryptKey(slot, mk); err == nil {
+				return val, nil
+			}
 		}
 	}
 
-	// Fallback to baked-in keys if no user key exists
+	// No personal key or decryption failed — use baked-in fallback
 	if fallback, ok := GetFallbackKey(slot); ok {
 		return fallback, nil
 	}
 
-	return "", fmt.Errorf("no key found for %s and no fallback available", slot)
+	return "", fmt.Errorf("no key configured for %s — run: goo config set-key %s", slot, slot)
 }
 
-// SetAPIKey encrypts and stores an API key.
+// SetAPIKey encrypts and stores a personal API key using the machine key.
+// No passphrase required — the machine key is generated automatically.
 func SetAPIKey(slot, value string) error {
-	key, err := getOrDeriveSessionKey()
+	mk, err := loadOrCreateMachineKey()
 	if err != nil {
 		return err
 	}
-	return encryptAndStoreKey(slot, value, key)
+	return encryptAndStoreKey(slot, value, mk)
 }
 
-// ResetSessionKey clears the cached passphrase (forces re-prompt on next use).
-func ResetSessionKey() {
-	sessionKeyMu.Lock()
-	defer sessionKeyMu.Unlock()
-	sessionKey = nil
-	sessionKeyOnce = sync.Once{} // allow re-derivation
-}
-
-func getOrDeriveSessionKey() ([]byte, error) {
-	sessionKeyMu.Lock()
-	defer sessionKeyMu.Unlock()
-	if sessionKey != nil {
-		return sessionKey, nil
-	}
-
-	salt, err := loadOrCreateSalt()
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Print("Enter Goo passphrase: ")
-	passphrase, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		return nil, err
-	}
-
-	derived := argon2.IDKey(passphrase, salt, 3, 64*1024, 4, 32)
-	sessionKey = derived
-	return derived, nil
-}
-
-func loadOrCreateSalt() ([]byte, error) {
-	saltPath := filepath.Join(GooConfigDir(), "salt")
-	data, err := os.ReadFile(saltPath)
-	if err == nil {
+// loadOrCreateMachineKey returns the 32-byte machine-specific encryption key.
+// It is generated once on first use and stored at ~/.config/goo/machine.key.
+// This key is unique per machine so keys.enc is not portable — by design.
+func loadOrCreateMachineKey() ([]byte, error) {
+	path := filepath.Join(GooConfigDir(), "machine.key")
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) == 32 {
 		return data, nil
 	}
-	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
+
+	// Generate a new machine key
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(GooConfigDir(), 0700); err != nil {
 		return nil, err
 	}
-	return salt, os.WriteFile(saltPath, salt, 0600)
+	if err := os.WriteFile(path, key, 0600); err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 func encryptAndStoreKey(slot, value string, masterKey []byte) error {
@@ -142,7 +114,7 @@ func loadAndDecryptKey(slot string, masterKey []byte) (string, error) {
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", errors.New("decryption failed: wrong passphrase?")
+		return "", errors.New("decryption failed — machine key mismatch?")
 	}
 	return string(plaintext), nil
 }

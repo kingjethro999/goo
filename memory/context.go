@@ -54,17 +54,53 @@ func (c *ContextBuilder) Build(userInput string) []Message {
 		})
 	}
 
-	// 5. Trim history to token budget
+	// 5. Trim history to token budget and append
 	history = c.trimToTokenBudget(history, userInput)
+	messages = append(messages, history...)
+
+	// 6. Append the user's current question as the final message
+	messages = append(messages, Message{
+		Role:    "user",
+		Content: userInput,
+	})
+
+	return messages
+}
+
+
+// BuildFollowUp constructs the messages array for a follow-up after tool execution.
+// Unlike Build(), it does NOT append a user message — the conversation already ends
+// with a tool result message and the AI should respond to that directly.
+func (c *ContextBuilder) BuildFollowUp() []Message {
+	var messages []Message
+
+	messages = append(messages, Message{
+		Role:    "system",
+		Content: c.buildSystemPrompt(),
+	})
+
+	history, _ := c.store.GetMessages(c.session.ID, 1000)
+	totalCount, _ := c.store.CountMessages(c.session.ID)
+
+	if totalCount > len(history) && c.session.Summary != "" {
+		messages = append(messages, Message{
+			Role:    "system",
+			Content: "[Summary of earlier conversation: " + c.session.Summary + "]",
+		})
+	}
+
+	history = c.trimToTokenBudget(history, "")
 	messages = append(messages, history...)
 	return messages
 }
 
 func (c *ContextBuilder) buildSystemPrompt() string {
 	var sb strings.Builder
-	sb.WriteString("You are Goo, a terminal AI assistant. Be concise, direct, and helpful.\n\n")
+	sb.WriteString("You are Goo, a powerful terminal AI assistant running on the user's Linux machine.\n")
+	sb.WriteString("You can search the web, run shell commands, read/write files, manage tasks, and query GitHub.\n\n")
 	sb.WriteString(fmt.Sprintf("Current date/time: %s\n", time.Now().Format("Monday, Jan 2 2006 15:04 MST")))
 	sb.WriteString(fmt.Sprintf("Session ID: %s\n", c.session.ID))
+	sb.WriteString("OS: Linux\n")
 
 	if tasks := c.store.GetRecentTaskSummary(); tasks != "" {
 		sb.WriteString(fmt.Sprintf("\nOpen tasks:\n%s\n", tasks))
@@ -76,9 +112,25 @@ func (c *ContextBuilder) buildSystemPrompt() string {
 		sb.WriteString(fmt.Sprintf("\nLatest search results:\n%s\n", searchCtx))
 	}
 
-	sb.WriteString("\nYou have access to tools: search_web, list_tasks, add_task, complete_task, get_github_prs, get_github_stats.\n")
-	sb.WriteString("When uncertain, ask ONE focused clarifying question.\n")
-	sb.WriteString("Never give up — always provide a best-effort answer.\n")
+	sb.WriteString(`
+Available tools and when to use them:
+- search_web: real-time info, news, prices, people, anything recent
+- run_command: execute ANY shell command (apt install, git, cd && make, etc.)
+- read_file: read a file's contents
+- write_file: create or overwrite a file with new content
+- find_files: locate files by name or content on the machine
+- list_tasks / add_task / complete_task: manage the task list
+- get_github_stats: GitHub contribution stats for a user
+- get_github_prs: open pull requests for the configured GitHub user
+- get_github_repos: list repositories for a GitHub user
+
+Rules:
+- For installs, code changes, or system ops — use run_command / write_file
+- When the user says "cd /some/path and do X" — use run_command with that cwd
+- Be proactive: chain multiple tool calls if needed to fully answer the user
+- Never give up. If one approach fails, try another.
+- Be concise but complete.
+`)
 	return sb.String()
 }
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -47,7 +48,7 @@ func RunChatSession(session *memory.Session, store *memory.Store) error {
 	return nil
 }
 
-// RunAskOnce sends a single question and prints the streamed response.
+// RunAskOnce sends a single question, enriches context with a web search, and streams the response.
 func RunAskOnce(question string, store *memory.Store) error {
 	r := renderer.New()
 	groqClient, err := ai.NewGroqClient()
@@ -63,14 +64,38 @@ func RunAskOnce(question string, store *memory.Store) error {
 	ctx := memory.NewContextBuilder(session, store)
 	messages := ctx.Build(question)
 
+	// Run a web search to ground the answer in current information.
+	// Inject results as a system message before the user's question.
+	searchClient := search.NewClient()
+	if resp, err := searchClient.Search(question); err == nil && resp != nil {
+		if summary := search.FormatForAI(resp); summary != "" {
+			// Insert search context just before the final user message
+			inject := memory.Message{
+				Role:    "system",
+				Content: "Web search results for context:\n" + summary,
+			}
+			// Splice before the last element (the user message)
+			messages = append(messages[:len(messages)-1], inject, messages[len(messages)-1])
+		}
+	}
+
 	r.PrintAILabel()
-	var fullResponse strings.Builder
-	if err := groqClient.StreamChat(context.Background(), messages, &fullResponse); err != nil {
+
+	// Stream directly to stdout so the user sees the response in real time
+	var buf strings.Builder
+	w := io.MultiWriter(os.Stdout, &buf)
+	if err := groqClient.StreamChat(context.Background(), messages, w); err != nil {
 		return fmt.Errorf("AI error: %w", err)
 	}
 	fmt.Println()
+
+	// Persist the exchange to session history
+	_ = store.SaveMessage(memory.Message{Role: "user", Content: question, SessionID: session.ID})
+	_ = store.SaveMessage(memory.Message{Role: "assistant", Content: buf.String(), SessionID: session.ID})
 	return nil
 }
+
+
 
 func handleSlashCommand(input string, session *memory.Session, store *memory.Store, r *renderer.Renderer, groq *ai.GroqClient) error {
 	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)

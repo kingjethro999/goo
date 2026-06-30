@@ -14,23 +14,65 @@ import (
 	"github.com/kingjethro999/goo/memory"
 )
 
+// ─── Providers ────────────────────────────────────────────────────────────────
+
+type Provider string
+
+const (
+	ProviderGroq     Provider = "groq"
+	ProviderOpenAI   Provider = "openai"
+	ProviderClaude   Provider = "claude"
+	ProviderDeepSeek Provider = "deepseek"
+)
+
+// ProviderDefaults maps provider → (baseURL, default model)
+var ProviderDefaults = map[Provider]struct {
+	BaseURL      string
+	DefaultModel string
+}{
+	ProviderGroq:     {"https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"},
+	ProviderOpenAI:   {"https://api.openai.com/v1", "gpt-4o-mini"},
+	ProviderClaude:   {"https://api.anthropic.com/v1", "claude-3-5-sonnet-20241022"},
+	ProviderDeepSeek: {"https://api.deepseek.com/v1", "deepseek-chat"},
+}
+
 const groqBaseURL = "https://api.groq.com/openai/v1"
 
-// GroqClient talks to the Groq AI API with streaming support.
+// ─── GroqClient ───────────────────────────────────────────────────────────────
+
+// GroqClient talks to Groq (and other OpenAI-compatible providers) with streaming support.
 type GroqClient struct {
 	httpClient *http.Client
 	model      string
+	provider   Provider
+	baseURL    string
 }
 
-// NewGroqClient creates a Groq client using the configured model.
+// NewGroqClient creates a client using the configured model & provider.
 func NewGroqClient() (*GroqClient, error) {
+	// Determine provider
+	providerStr := config.Get("general.default_provider")
+	provider := Provider(providerStr)
+	if provider == "" {
+		provider = ProviderGroq
+	}
+
+	defaults, ok := ProviderDefaults[provider]
+	if !ok {
+		provider = ProviderGroq
+		defaults = ProviderDefaults[ProviderGroq]
+	}
+
 	model := config.Get("general.default_model")
 	if model == "" {
-		model = "llama-3.3-70b-versatile"
+		model = defaults.DefaultModel
 	}
+
 	return &GroqClient{
 		httpClient: &http.Client{},
 		model:      model,
+		provider:   provider,
+		baseURL:    defaults.BaseURL,
 	}, nil
 }
 
@@ -39,6 +81,11 @@ func (c *GroqClient) Model() string { return c.model }
 
 // SetModel changes the model for the current session.
 func (c *GroqClient) SetModel(model string) { c.model = model }
+
+// Provider returns the active provider.
+func (c *GroqClient) Provider() Provider { return c.provider }
+
+// ─── API types ────────────────────────────────────────────────────────────────
 
 type chatRequest struct {
 	Model       string        `json:"model"`
@@ -52,11 +99,24 @@ type chatRequest struct {
 }
 
 type groqMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Name       string `json:"name,omitempty"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	ToolCalls  []toolCallEntry `json:"tool_calls,omitempty"`
 }
+
+// toolCallEntry represents a tool call made by the assistant in the message history.
+type toolCallEntry struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// ─── Public methods ───────────────────────────────────────────────────────────
 
 // StreamChat sends a chat request and streams the response to out.
 func (c *GroqClient) StreamChat(ctx context.Context, messages []memory.Message, out io.Writer) error {
@@ -67,6 +127,10 @@ func (c *GroqClient) StreamChat(ctx context.Context, messages []memory.Message, 
 // StreamChatWithTools sends a chat request with tool definitions.
 // Returns a *ToolCall if the model wants to invoke a tool, nil otherwise.
 func (c *GroqClient) StreamChatWithTools(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
+	// Claude has a different API — handle separately
+	if c.provider == ProviderClaude {
+		return c.streamChatClaude(ctx, messages, out, tools)
+	}
 	return c.streamChatInternal(ctx, messages, out, tools)
 }
 
@@ -75,9 +139,9 @@ func (c *GroqClient) Complete(ctx context.Context, prompt, model string) (string
 	if model == "" {
 		model = c.model
 	}
-	apiKey, err := config.GetAPIKey("groq")
+	apiKey, err := c.getAPIKey()
 	if err != nil {
-		return "", fmt.Errorf("groq key not found: run 'goo config set-key groq'")
+		return "", err
 	}
 
 	gMsgs := []groqMessage{
@@ -93,11 +157,11 @@ func (c *GroqClient) Complete(ctx context.Context, prompt, model string) (string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", groqBaseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	c.setAuthHeader(req, apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -122,10 +186,30 @@ func (c *GroqClient) Complete(ctx context.Context, prompt, model string) (string
 	return result.Choices[0].Message.Content, nil
 }
 
-func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
-	apiKey, err := config.GetAPIKey("groq")
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+func (c *GroqClient) getAPIKey() (string, error) {
+	key, err := config.GetAPIKey(string(c.provider))
 	if err != nil {
-		return nil, fmt.Errorf("groq key not found: run 'goo config set-key groq'")
+		return "", fmt.Errorf("%s key not found: run 'goo config set-key %s'", c.provider, c.provider)
+	}
+	return key, nil
+}
+
+func (c *GroqClient) setAuthHeader(req *http.Request, apiKey string) {
+	switch c.provider {
+	case ProviderClaude:
+		req.Header.Set("x-api-key", apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	default:
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
+func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
+	apiKey, err := c.getAPIKey()
+	if err != nil {
+		return nil, err
 	}
 
 	maxTok := config.GetInt("ai.max_tokens")
@@ -133,13 +217,23 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 		maxTok = 4096
 	}
 
-	gMsgs := make([]groqMessage, len(messages))
-	for i, m := range messages {
-		gMsgs[i] = groqMessage{
+	gMsgs := make([]groqMessage, 0, len(messages))
+	for _, m := range messages {
+		gm := groqMessage{
 			Role:       m.Role,
 			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 		}
+		// For assistant messages that represent a tool call, attach the tool_calls
+		// array so Groq can match the subsequent tool result message.
+		if m.Role == "assistant" && m.ToolCallID != "" {
+			gm.Content = "" // must be empty or null for tool-call assistant messages
+			entry := toolCallEntry{ID: m.ToolCallID, Type: "function"}
+			entry.Function.Name = m.ToolName
+			entry.Function.Arguments = "{}"
+			gm.ToolCalls = []toolCallEntry{entry}
+		}
+		gMsgs = append(gMsgs, gm)
 	}
 
 	body, err := json.Marshal(chatRequest{
@@ -153,11 +247,11 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", groqBaseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	c.setAuthHeader(req, apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -204,12 +298,10 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 
 		choice := event.Choices[0]
 
-		// Normal text streaming
 		if choice.Delta.Content != "" {
 			fmt.Fprint(out, choice.Delta.Content)
 		}
 
-		// Tool call streaming
 		if len(choice.Delta.ToolCalls) > 0 {
 			tc := choice.Delta.ToolCalls[0]
 			if pendingToolCall == nil {
@@ -232,7 +324,96 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 	return pendingToolCall, nil
 }
 
-// --- Tool definitions ---
+// ─── Claude-specific streaming ─────────────────────────────────────────────────
+
+func (c *GroqClient) streamChatClaude(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
+	apiKey, err := c.getAPIKey()
+	if err != nil {
+		return nil, err
+	}
+
+	// Build Claude message format (system prompt separate)
+	var systemContent string
+	var claudeMsgs []map[string]interface{}
+	for _, m := range messages {
+		if m.Role == "system" {
+			systemContent += m.Content + "\n"
+			continue
+		}
+		role := m.Role
+		if role == "tool" {
+			role = "user"
+		}
+		claudeMsgs = append(claudeMsgs, map[string]interface{}{
+			"role":    role,
+			"content": m.Content,
+		})
+	}
+
+	maxTok := config.GetInt("ai.max_tokens")
+	if maxTok == 0 {
+		maxTok = 4096
+	}
+
+	payload := map[string]interface{}{
+		"model":      c.model,
+		"max_tokens": maxTok,
+		"stream":     true,
+		"messages":   claudeMsgs,
+	}
+	if systemContent != "" {
+		payload["system"] = strings.TrimSpace(systemContent)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("claude API error %d: %s", resp.StatusCode, string(b))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		var event struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+		if event.Type == "content_block_delta" && event.Delta.Text != "" {
+			fmt.Fprint(out, event.Delta.Text)
+		}
+	}
+	return nil, scanner.Err()
+}
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
 
 type toolCall struct {
 	ID       string `json:"id"`

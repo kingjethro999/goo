@@ -29,12 +29,13 @@ type storeData struct {
 }
 
 type storedMessage struct {
-	ID        int       `json:"id"`
-	SessionID string    `json:"session_id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	ToolName  string    `json:"tool_name,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int       `json:"id"`
+	SessionID  string    `json:"session_id"`
+	Role       string    `json:"role"`
+	Content    string    `json:"content"`
+	ToolName   string    `json:"tool_name,omitempty"`
+	ToolCallID string    `json:"tool_call_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // NewStore opens (or creates) the history store.
@@ -145,12 +146,13 @@ func (s *Store) SaveMessage(msg Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sm := storedMessage{
-		ID:        len(s.data.Messages) + 1,
-		SessionID: msg.SessionID,
-		Role:      msg.Role,
-		Content:   msg.Content,
-		ToolName:  msg.ToolName,
-		CreatedAt: time.Now(),
+		ID:         len(s.data.Messages) + 1,
+		SessionID:  msg.SessionID,
+		Role:       msg.Role,
+		Content:    msg.Content,
+		ToolName:   msg.ToolName,
+		ToolCallID: msg.ToolCallID,
+		CreatedAt:  time.Now(),
 	}
 	s.data.Messages = append(s.data.Messages, sm)
 	return s.save()
@@ -173,12 +175,13 @@ func (s *Store) GetMessages(sessionID string, limit int) ([]Message, error) {
 	msgs := make([]Message, len(filtered))
 	for i, m := range filtered {
 		msgs[i] = Message{
-			ID:        m.ID,
-			SessionID: m.SessionID,
-			Role:      m.Role,
-			Content:   m.Content,
-			ToolName:  m.ToolName,
-			CreatedAt: m.CreatedAt,
+			ID:         m.ID,
+			SessionID:  m.SessionID,
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolName:   m.ToolName,
+			ToolCallID: m.ToolCallID,
+			CreatedAt:  m.CreatedAt,
 		}
 	}
 	return msgs, nil
@@ -212,12 +215,13 @@ func (s *Store) GetMessagesPage(sessionID string, offset, limit int) ([]Message,
 	msgs := make([]Message, len(filtered))
 	for i, m := range filtered {
 		msgs[i] = Message{
-			ID:        m.ID,
-			SessionID: m.SessionID,
-			Role:      m.Role,
-			Content:   m.Content,
-			ToolName:  m.ToolName,
-			CreatedAt: m.CreatedAt,
+			ID:         m.ID,
+			SessionID:  m.SessionID,
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolName:   m.ToolName,
+			ToolCallID: m.ToolCallID,
+			CreatedAt:  m.CreatedAt,
 		}
 	}
 	return msgs, nil
