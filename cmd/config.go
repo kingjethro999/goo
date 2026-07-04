@@ -19,7 +19,7 @@ var setKeyCmd = &cobra.Command{
 	Long: `Store an API key securely (encrypted, machine-local).
 
 Supported providers:
-  groq       — default AI (llama-3.3-70b, mixtral, gemma)
+  groq       — default AI (gpt-oss-120b, qwen3.6-27b)
   openai     — GPT-4o, GPT-4o-mini
   claude     — Claude 3.5 Sonnet (Anthropic)
   deepseek   — DeepSeek Chat

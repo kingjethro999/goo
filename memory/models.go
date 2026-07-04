@@ -22,6 +22,7 @@ type Message struct {
 	Content    string
 	ToolName   string
 	ToolCallID string
+	ImageURL   string
 	SessionID  string
 	CreatedAt  time.Time
 }

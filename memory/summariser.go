@@ -31,7 +31,7 @@ func SummariseSession(sessionID string, store *Store, client ChatClient) error {
 Transcript:
 %s`, transcript.String())
 
-	summary, err := client.Complete(context.Background(), summaryPrompt, "llama-3.3-70b-versatile")
+	summary, err := client.Complete(context.Background(), summaryPrompt, "")
 	if err != nil {
 		return err
 	}

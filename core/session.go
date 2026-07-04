@@ -15,8 +15,6 @@ import (
 	"github.com/kingjethro999/goo/tools/github"
 	"github.com/kingjethro999/goo/tools/search"
 	"github.com/kingjethro999/goo/tools/tasks"
-	"github.com/muesli/reflow/wordwrap"
-	"golang.org/x/term"
 )
 
 // RunChatSession starts and manages an interactive chat session using the Bubbletea TUI.
@@ -43,6 +41,7 @@ func RunChatSession(session *memory.Session, store *memory.Store) error {
 	p := tea.NewProgram(
 		tui.New(session, store, groqClient, AllTools, dispatcher),
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
@@ -85,13 +84,7 @@ func RunAskOnce(question string, store *memory.Store) error {
 
 	// Stream directly to stdout so the user sees the response in real time
 	var buf strings.Builder
-	width := 80
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		width = w
-	}
-	ww := wordwrap.NewWriter(width - 4) // leaves margin
-	defer ww.Close()
-	w := io.MultiWriter(ww, &buf)
+	w := io.MultiWriter(os.Stdout, &buf)
 	if err := groqClient.StreamChat(context.Background(), messages, w); err != nil {
 		return fmt.Errorf("AI error: %w", err)
 	}
@@ -105,7 +98,8 @@ func RunAskOnce(question string, store *memory.Store) error {
 
 
 
-func handleSlashCommand(input string, session *memory.Session, store *memory.Store, r *renderer.Renderer, groq *ai.GroqClient) error {
+// HandleSlashCommand processes interactive slash commands like /search, /model, /history, /summary.
+func HandleSlashCommand(input string, session *memory.Session, store *memory.Store, r *renderer.Renderer, groq *ai.GroqClient) error {
 	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
 	cmd := strings.ToLower(parts[0])
 	args := ""
@@ -115,7 +109,7 @@ func handleSlashCommand(input string, session *memory.Session, store *memory.Sto
 
 	switch cmd {
 	case "help":
-		printHelp(r)
+		PrintHelp(r)
 	case "context":
 		msgs, _ := store.GetMessages(session.ID, 10)
 		r.PrintInfo(fmt.Sprintf("Context: %d messages in session", len(msgs)))
@@ -169,7 +163,8 @@ func handleSlashCommand(input string, session *memory.Session, store *memory.Sto
 	return nil
 }
 
-func printHelp(r *renderer.Renderer) {
+// PrintHelp displays help information for available slash commands.
+func PrintHelp(r *renderer.Renderer) {
 	help := `
   Slash commands (also available inside the TUI):
     /search <query>   — web search (Tavily)

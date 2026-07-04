@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kingjethro999/goo/memory"
+	"github.com/muesli/reflow/wordwrap"
+	"golang.org/x/term"
 )
 
 // Colours (ANSI escape codes)
@@ -28,12 +30,25 @@ const (
 // Renderer handles all terminal output for Goo.
 type Renderer struct {
 	noColor bool
+	width   int
+}
+
+// wrap word-wraps a string to the terminal width, leaving a small margin.
+func (r *Renderer) wrap(s string) string {
+	if r.width <= 10 {
+		return s
+	}
+	return wordwrap.String(s, r.width-4)
 }
 
 // New creates a Renderer. Detects NO_COLOR env var.
 func New() *Renderer {
 	_, noColor := os.LookupEnv("NO_COLOR")
-	return &Renderer{noColor: noColor}
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		width = w
+	}
+	return &Renderer{noColor: noColor, width: width}
 }
 
 func (r *Renderer) color(code string) string {
@@ -72,22 +87,22 @@ func (r *Renderer) PrintAILabel() {
 
 // PrintInfo prints an info message.
 func (r *Renderer) PrintInfo(msg string) {
-	fmt.Printf("%s%s  %s%s\n", r.color(blue), "ℹ", msg, r.color(reset))
+	fmt.Printf("%s%s  %s%s\n", r.color(blue), "ℹ", r.wrap(msg), r.color(reset))
 }
 
 // PrintSuccess prints a success message.
 func (r *Renderer) PrintSuccess(msg string) {
-	fmt.Printf("%s%s  %s%s\n", r.color(green), "✓", msg, r.color(reset))
+	fmt.Printf("%s%s  %s%s\n", r.color(green), "✓", r.wrap(msg), r.color(reset))
 }
 
 // PrintError prints an error message.
 func (r *Renderer) PrintError(err error) {
-	fmt.Printf("%s%s  Error: %v%s\n", r.color(red), "✗", err, r.color(reset))
+	fmt.Printf("%s%s  Error: %s%s\n", r.color(red), "✗", r.wrap(err.Error()), r.color(reset))
 }
 
 // PrintWarning prints a warning message.
 func (r *Renderer) PrintWarning(msg string) {
-	fmt.Printf("%s%s  %s%s\n", r.color(yellow), "⚠", msg, r.color(reset))
+	fmt.Printf("%s%s  %s%s\n", r.color(yellow), "⚠", r.wrap(msg), r.color(reset))
 }
 
 // StreamWriter returns an io.Writer that writes directly to stdout.
@@ -100,6 +115,7 @@ func (r *Renderer) PrintFollowUp(suggestion string) {
 	if suggestion == "" {
 		return
 	}
+	suggestion = r.wrap(suggestion)
 	fmt.Printf("  %s%s · %s%s\n", r.color(dim), r.color(italic), suggestion, r.color(reset))
 }
 
@@ -167,7 +183,7 @@ func (r *Renderer) PrintSearchResults(query string, results []SearchResult, answ
 	fmt.Printf("%s%s%s\n", r.color(cyan), line, r.color(reset))
 
 	if answer != "" {
-		fmt.Printf("\n  %s%sAI Summary:%s %s\n\n", r.color(bold), r.color(green), r.color(reset), answer)
+		fmt.Printf("\n  %s%sAI Summary:%s %s\n\n", r.color(bold), r.color(green), r.color(reset), r.wrap(answer))
 	}
 
 	for i, result := range results {

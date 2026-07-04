@@ -97,22 +97,25 @@ func (c *ContextBuilder) BuildFollowUp() []Message {
 func (c *ContextBuilder) buildSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("You are Goo, a powerful terminal AI assistant running on the user's Linux machine.\n")
-	sb.WriteString("You can search the web, run shell commands, read/write files, manage tasks, and query GitHub.\n\n")
+	if c.session.Mode != "ask" {
+		sb.WriteString("You can search the web, run shell commands, read/write files, manage tasks, and query GitHub.\n\n")
+	}
 	sb.WriteString(fmt.Sprintf("Current date/time: %s\n", time.Now().Format("Monday, Jan 2 2006 15:04 MST")))
 	sb.WriteString(fmt.Sprintf("Session ID: %s\n", c.session.ID))
 	sb.WriteString("OS: Linux\n")
 
-	if tasks := c.store.GetRecentTaskSummary(); tasks != "" {
-		sb.WriteString(fmt.Sprintf("\nOpen tasks:\n%s\n", tasks))
-	}
-	if ghCtx := c.store.GetGitHubContext(c.session.ID); ghCtx != "" {
-		sb.WriteString(fmt.Sprintf("\nGitHub context:\n%s\n", ghCtx))
-	}
-	if searchCtx := c.store.GetSearchContext(c.session.ID); searchCtx != "" {
-		sb.WriteString(fmt.Sprintf("\nLatest search results:\n%s\n", searchCtx))
-	}
+	if c.session.Mode != "ask" {
+		if tasks := c.store.GetRecentTaskSummary(); tasks != "" {
+			sb.WriteString(fmt.Sprintf("\nOpen tasks:\n%s\n", tasks))
+		}
+		if ghCtx := c.store.GetGitHubContext(c.session.ID); ghCtx != "" {
+			sb.WriteString(fmt.Sprintf("\nGitHub context:\n%s\n", ghCtx))
+		}
+		if searchCtx := c.store.GetSearchContext(c.session.ID); searchCtx != "" {
+			sb.WriteString(fmt.Sprintf("\nLatest search results:\n%s\n", searchCtx))
+		}
 
-	sb.WriteString(`
+		sb.WriteString(`
 Available tools and when to use them:
 - search_web: real-time info, news, prices, people, anything recent
 - run_command: execute ANY shell command (apt install, git, cd && make, etc.)
@@ -131,6 +134,9 @@ Rules:
 - Never give up. If one approach fails, try another.
 - Be concise but complete.
 `)
+	} else {
+		sb.WriteString("\nYou are in one-shot ask mode. Answer the user's question directly and concisely based on your knowledge and the provided search context.\n")
+	}
 	return sb.String()
 }
 

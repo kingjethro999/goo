@@ -1260,7 +1260,7 @@ In the example above, out of 4641 prompt tokens, 4608 tokens (99.3%) were served
 
 To calculate your cache hit rate:
 
-`Cache Hit Rate = cached_tokens / prompt_tokens × 100%` 
+`Cache Hit Rate = cached_tokens / prompt_tokens × 100% ` 
 
 For the example above: `4608 / 4641 × 100% = 99.3%`
 

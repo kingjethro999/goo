@@ -13,6 +13,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
+- [Agent Skills Engine](#agent-skills-engine)
 - [Commands](#commands)
   - [goo chat](#goo-chat)
   - [goo ask](#goo-ask)
@@ -36,7 +37,11 @@
 |---|---|
 | 🧠 **Persistent Memory** | Goo remembers your entire conversation history within and across sessions using SQLite |
 | 🔄 **Session Summarisation** | Long conversations are automatically summarised in the background so context is never lost |
-| 🛠 **Autonomous Tools** | The AI can call tools (search, tasks, GitHub) on its own — no slash commands needed |
+| 📡 **Real-Time Agent Feed** | Live action tracking & step-by-step reasoning feed (`Thought for 1s >`, `Analyzed 📄 file #L1-40`, `Run ⚡ go test`) |
+| 🎯 **Agent Skills Engine** | Modular slash commands & prompt recipes defined in `.goo/skills`, `.claude/skills`, or `~/.config/goo/skills` |
+| 💻 **Agentic Coding** | Read and edit files with precision line-scoped replacement, directory listing, and deep regex grep search |
+| 🛠 **Autonomous Tools** | The AI can call tools (file reading/writing, shell commands, grep, search, tasks, GitHub) on its own |
+| 🛡 **Git Safety Gating** | Automatic risk tier classification (Safe, Low, Moderate, High) with Git stash checkpoints for safe undos |
 | 📋 **Task Manager** | Fully offline SQLite-backed task manager the AI reads and writes to |
 | 🔍 **Deep File Search** | Scan your entire home directory to find any file, instantly |
 | 🌐 **Web Search** | Real-time web search via Tavily with AI-summarized results |
@@ -96,6 +101,40 @@ goo config set-key github
 ```bash
 goo chat
 ```
+
+---
+
+## Agent Skills Engine
+
+Goo automatically scans for and loads custom **Agent Skills** at the beginning of every session. Skills allow you to define modular prompt recipes, custom slash triggers, domain-specific coding guidelines, and custom workflows.
+
+### Skill Locations
+Goo checks three locations (project-specific & global) in order:
+1. `.goo/skills/` (project root)
+2. `.claude/skills/` (compatibility with Claude CLI skills)
+3. `~/.config/goo/skills/` (global user skills available across all projects)
+
+### Creating a Custom Skill
+Each skill is a `.md` Markdown file containing YAML frontmatter:
+
+```markdown
+---
+name: code-review
+description: Perform strict security and performance code review
+trigger: /review
+---
+
+# Code Review Protocol
+When performing a code review:
+1. Check for unsanitized user inputs or SQL/Command injection risks.
+2. Verify error handling for all Go function calls.
+3. Suggest performance optimizations without breaking existing tests.
+```
+
+### Automatic Discovery & Execution
+- **On Every Session Start**: Goo automatically aggregates all discovered skills into the AI agent's system prompt.
+- **AI Awareness**: The AI is immediately aware of your skills and can follow their instructions automatically whenever relevant.
+- **Slash Triggers**: Skills defining a `trigger:` (e.g. `/review` or `/test`) can be invoked inside the chat interface.
 
 ---
 

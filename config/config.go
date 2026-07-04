@@ -36,6 +36,10 @@ type Schema struct {
 		MaxResults  int    `toml:"max_results"`
 		SearchDepth string `toml:"search_depth"`
 	} `toml:"search"`
+	Agent struct {
+		SafetyPolicy string   `toml:"safety_policy"`
+		Allowlist    []string `toml:"allowlist"`
+	} `toml:"agent"`
 }
 
 var (
@@ -71,6 +75,13 @@ func loadConfig(path string) error {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Migrate deprecated models
+	if cfg.General.DefaultModel == "llama-3.3-70b-versatile" || cfg.General.DefaultModel == "llama-3.1-70b-versatile" || cfg.General.DefaultModel == "llama3-groq-70b-8192-tool-use-preview" {
+		cfg.General.DefaultModel = "openai/gpt-oss-120b"
+		_ = writeConfig(path, cfg)
+	}
+
 	return nil
 }
 
@@ -97,6 +108,8 @@ func Get(key string) string {
 		return cfg.Search.SearchDepth
 	case "ai.system_prompt":
 		return cfg.AI.SystemPrompt
+	case "agent.safety_policy":
+		return cfg.Agent.SafetyPolicy
 	}
 	return ""
 }
@@ -144,6 +157,8 @@ func Set(key, value string) error {
 		cfg.GitHub.Username = value
 	case "github.default_repo":
 		cfg.GitHub.DefaultRepo = value
+	case "agent.safety_policy":
+		cfg.Agent.SafetyPolicy = value
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -164,7 +179,7 @@ func writeConfig(path string, c Schema) error {
 
 func defaultConfig() Schema {
 	var c Schema
-	c.General.DefaultModel = "llama-3.3-70b-versatile"
+	c.General.DefaultModel = "openai/gpt-oss-120b"
 	c.General.Theme = "dark"
 	c.General.HistoryLimit = 50
 	c.General.AutoFollowup = true
@@ -175,6 +190,8 @@ func defaultConfig() Schema {
 	c.Tasks.DefaultPriority = "medium"
 	c.Search.MaxResults = 5
 	c.Search.SearchDepth = "basic"
+	c.Agent.SafetyPolicy = "always_confirm"
+	c.Agent.Allowlist = []string{"npm install", "npm run *", "git add", "git status", "git diff", "write_file"}
 	return c
 }
 
@@ -187,4 +204,19 @@ func DefaultConfigPath() string {
 func GooConfigDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "goo")
+}
+
+// GetAgentAllowlist returns the current safety policy allowlist
+func GetAgentAllowlist() []string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	return cfg.Agent.Allowlist
+}
+
+// SetAgentAllowlist updates and persists the safety policy allowlist
+func SetAgentAllowlist(list []string) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	cfg.Agent.Allowlist = list
+	return writeConfig(DefaultConfigPath(), cfg)
 }

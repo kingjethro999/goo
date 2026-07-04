@@ -30,13 +30,11 @@ var ProviderDefaults = map[Provider]struct {
 	BaseURL      string
 	DefaultModel string
 }{
-	ProviderGroq:     {"https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"},
+	ProviderGroq:     {"https://api.groq.com/openai/v1", "openai/gpt-oss-120b"},
 	ProviderOpenAI:   {"https://api.openai.com/v1", "gpt-4o-mini"},
 	ProviderClaude:   {"https://api.anthropic.com/v1", "claude-3-5-sonnet-20241022"},
 	ProviderDeepSeek: {"https://api.deepseek.com/v1", "deepseek-chat"},
 }
-
-const groqBaseURL = "https://api.groq.com/openai/v1"
 
 // ─── GroqClient ───────────────────────────────────────────────────────────────
 
@@ -68,6 +66,11 @@ func NewGroqClient() (*GroqClient, error) {
 		model = defaults.DefaultModel
 	}
 
+	// Map deprecated models to recommended replacement
+	if provider == ProviderGroq && (model == "llama-3.3-70b-versatile" || model == "llama-3.1-70b-versatile" || model == "llama3-groq-70b-8192-tool-use-preview") {
+		model = "openai/gpt-oss-120b"
+	}
+
 	return &GroqClient{
 		httpClient: &http.Client{},
 		model:      model,
@@ -87,20 +90,38 @@ func (c *GroqClient) Provider() Provider { return c.provider }
 
 // ─── API types ────────────────────────────────────────────────────────────────
 
+type StreamOptions struct {
+	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "high", "medium", "low", "none"
+	ReasoningFormat string `json:"reasoning_format,omitempty"` // "parsed", "raw", "hidden"
+	Model           string `json:"model,omitempty"`
+}
+
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []groqMessage `json:"messages"`
-	Stream      bool          `json:"stream"`
-	MaxTok      int           `json:"max_completion_tokens"`
-	Temperature float64       `json:"temperature,omitempty"`
-	TopP        float64       `json:"top_p,omitempty"`
-	Tools       []Tool        `json:"tools,omitempty"`
-	Stop        []string      `json:"stop,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []groqMessage `json:"messages"`
+	Stream          bool          `json:"stream"`
+	MaxTok          int           `json:"max_completion_tokens,omitempty"`
+	Temperature     float64       `json:"temperature,omitempty"`
+	TopP            float64       `json:"top_p,omitempty"`
+	Tools           []Tool        `json:"tools,omitempty"`
+	Stop            []string      `json:"stop,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	ReasoningFormat string        `json:"reasoning_format,omitempty"`
+}
+
+type contentPart struct {
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *contentImageURL `json:"image_url,omitempty"`
+}
+
+type contentImageURL struct {
+	URL string `json:"url"`
 }
 
 type groqMessage struct {
 	Role       string          `json:"role"`
-	Content    string          `json:"content"`
+	Content    interface{}     `json:"content"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
 	ToolCalls  []toolCallEntry `json:"tool_calls,omitempty"`
@@ -120,18 +141,22 @@ type toolCallEntry struct {
 
 // StreamChat sends a chat request and streams the response to out.
 func (c *GroqClient) StreamChat(ctx context.Context, messages []memory.Message, out io.Writer) error {
-	_, err := c.streamChatInternal(ctx, messages, out, nil)
+	_, err := c.streamChatInternal(ctx, messages, out, nil, StreamOptions{})
 	return err
 }
 
 // StreamChatWithTools sends a chat request with tool definitions.
 // Returns a *ToolCall if the model wants to invoke a tool, nil otherwise.
 func (c *GroqClient) StreamChatWithTools(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
-	// Claude has a different API — handle separately
+	return c.StreamChatWithToolsEx(ctx, messages, out, tools, StreamOptions{})
+}
+
+// StreamChatWithToolsEx sends a chat request with tool definitions and extra streaming options.
+func (c *GroqClient) StreamChatWithToolsEx(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool, opts StreamOptions) (*ToolCall, error) {
 	if c.provider == ProviderClaude {
 		return c.streamChatClaude(ctx, messages, out, tools)
 	}
-	return c.streamChatInternal(ctx, messages, out, tools)
+	return c.streamChatInternal(ctx, messages, out, tools, opts)
 }
 
 // Complete sends a one-shot non-streaming request and returns the full response.
@@ -206,7 +231,7 @@ func (c *GroqClient) setAuthHeader(req *http.Request, apiKey string) {
 	}
 }
 
-func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool) (*ToolCall, error) {
+func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.Message, out io.Writer, tools []Tool, opts StreamOptions) (*ToolCall, error) {
 	apiKey, err := c.getAPIKey()
 	if err != nil {
 		return nil, err
@@ -217,17 +242,28 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 		maxTok = 4096
 	}
 
+	modelToUse := c.model
+	if opts.Model != "" {
+		modelToUse = opts.Model
+	}
+
 	gMsgs := make([]groqMessage, 0, len(messages))
 	for _, m := range messages {
+		var contentVal interface{} = m.Content
+		if m.ImageURL != "" {
+			contentVal = []contentPart{
+				{Type: "text", Text: m.Content},
+				{Type: "image_url", ImageURL: &contentImageURL{URL: m.ImageURL}},
+			}
+		}
+
 		gm := groqMessage{
 			Role:       m.Role,
-			Content:    m.Content,
+			Content:    contentVal,
 			ToolCallID: m.ToolCallID,
 		}
-		// For assistant messages that represent a tool call, attach the tool_calls
-		// array so Groq can match the subsequent tool result message.
 		if m.Role == "assistant" && m.ToolCallID != "" {
-			gm.Content = "" // must be empty or null for tool-call assistant messages
+			gm.Content = ""
 			entry := toolCallEntry{ID: m.ToolCallID, Type: "function"}
 			entry.Function.Name = m.ToolName
 			entry.Function.Arguments = "{}"
@@ -236,13 +272,17 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 		gMsgs = append(gMsgs, gm)
 	}
 
-	body, err := json.Marshal(chatRequest{
-		Model:    c.model,
-		Messages: gMsgs,
-		Stream:   true,
-		MaxTok:   maxTok,
-		Tools:    tools,
-	})
+	reqBody := chatRequest{
+		Model:           modelToUse,
+		Messages:        gMsgs,
+		Stream:          true,
+		MaxTok:          maxTok,
+		Tools:           tools,
+		ReasoningEffort: opts.ReasoningEffort,
+		ReasoningFormat: opts.ReasoningFormat,
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +401,9 @@ func (c *GroqClient) streamChatClaude(ctx context.Context, messages []memory.Mes
 		"stream":     true,
 		"messages":   claudeMsgs,
 	}
+	if len(tools) > 0 {
+		payload["tools"] = tools
+	}
 	if systemContent != "" {
 		payload["system"] = strings.TrimSpace(systemContent)
 	}
@@ -424,10 +467,33 @@ type toolCall struct {
 	} `json:"function"`
 }
 
-// Tool is a function definition for Groq tool calling.
+// Tool is a function or remote MCP definition for Groq tool calling.
 type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Type        string        `json:"type"`
+	Function    *ToolFunction `json:"function,omitempty"`
+	ConnectorID string        `json:"connector_id,omitempty"`
+	ServerLabel string        `json:"server_label,omitempty"`
+}
+
+// NewFunctionTool creates a standard function tool.
+func NewFunctionTool(name, description string, params json.RawMessage) Tool {
+	return Tool{
+		Type: "function",
+		Function: &ToolFunction{
+			Name:        name,
+			Description: description,
+			Parameters:  params,
+		},
+	}
+}
+
+// NewRemoteMCPTool creates a Groq remote MCP connector tool.
+func NewRemoteMCPTool(connectorID, serverLabel string) Tool {
+	return Tool{
+		Type:        "mcp",
+		ConnectorID: connectorID,
+		ServerLabel: serverLabel,
+	}
 }
 
 // ToolFunction describes a callable function.
@@ -447,7 +513,7 @@ type ToolCall struct {
 // SearchWebTool is the Groq tool definition for web search.
 var SearchWebTool = Tool{
 	Type: "function",
-	Function: ToolFunction{
+	Function: &ToolFunction{
 		Name:        "search_web",
 		Description: "Search the web for current information. Use when the user asks about recent events, news, prices, or anything that may not be in training data.",
 		Parameters: json.RawMessage(`{
@@ -461,4 +527,110 @@ var SearchWebTool = Tool{
 			"required": ["query"]
 		}`),
 	},
+}
+
+// FormatToolAction creates a concise, human-readable action description with icons and target line ranges
+// matching top agentic CLI standards (e.g. Antigravity, Cursor, Claude Code).
+func FormatToolAction(call *ToolCall) string {
+	if call == nil {
+		return "Thinking..."
+	}
+	switch call.Name {
+	case "read_file":
+		var args struct {
+			Path      string `json:"path"`
+			StartLine int    `json:"start_line"`
+			EndLine   int    `json:"end_line"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		path := args.Path
+		if path == "" {
+			path = "file"
+		}
+		if args.StartLine > 0 && args.EndLine > 0 {
+			return fmt.Sprintf("Analyzed 📄 %s #L%d-%d", path, args.StartLine, args.EndLine)
+		} else if args.StartLine > 0 {
+			return fmt.Sprintf("Analyzed 📄 %s #L%d+", path, args.StartLine)
+		}
+		return fmt.Sprintf("Analyzed 📄 %s", path)
+
+	case "write_file":
+		var args struct {
+			Path      string `json:"path"`
+			StartLine int    `json:"start_line"`
+			EndLine   int    `json:"end_line"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		path := args.Path
+		if path == "" {
+			path = "file"
+		}
+		if args.StartLine > 0 && args.EndLine > 0 {
+			return fmt.Sprintf("Updated ✏️ %s #L%d-%d", path, args.StartLine, args.EndLine)
+		}
+		return fmt.Sprintf("Updated ✏️ %s", path)
+
+	case "list_dir":
+		var args struct {
+			Dir string `json:"dir"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		dir := args.Dir
+		if dir == "" {
+			dir = "."
+		}
+		return fmt.Sprintf("Explored 📁 %s", dir)
+
+	case "grep_search":
+		var args struct {
+			Query string `json:"query"`
+			Path  string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		q := args.Query
+		if len(q) > 30 {
+			q = q[:27] + "..."
+		}
+		p := args.Path
+		if p == "" {
+			p = "."
+		}
+		return fmt.Sprintf("Searched 🔍 %q in %s", q, p)
+
+	case "find_files":
+		var args struct {
+			Pattern string `json:"pattern"`
+			Dir     string `json:"dir"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		return fmt.Sprintf("Found 🔍 pattern %q in %s", args.Pattern, args.Dir)
+
+	case "run_command":
+		var args struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		cmdStr := args.Command
+		if len(cmdStr) > 40 {
+			cmdStr = cmdStr[:37] + "..."
+		}
+		return fmt.Sprintf("Run ⚡ %s", cmdStr)
+
+	case "delete_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		return fmt.Sprintf("Deleted 🗑 %s", args.Path)
+
+	case "search_web":
+		var args struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		return fmt.Sprintf("Web searched 🌐 %q", args.Query)
+
+	default:
+		return fmt.Sprintf("Executed ⚙ %s", call.Name)
+	}
 }

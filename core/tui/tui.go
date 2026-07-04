@@ -18,11 +18,10 @@ import (
 
 // Available models to cycle through with Tab
 var availableModels = []string{
-	"llama-3.3-70b-versatile",
-	"llama-3.1-70b-versatile",
-	"llama3-groq-70b-8192-tool-use-preview",
-	"mixtral-8x7b-32768",
-	"gemma2-9b-it",
+	"openai/gpt-oss-120b",
+	"qwen/qwen3.6-27b",
+	"openai/gpt-oss-20b",
+	"llama-3.1-8b-instant",
 }
 
 var (
@@ -56,6 +55,7 @@ type Model struct {
 	width        int
 	height       int
 	status       string // "idle" | "streaming" | "tool_execution"
+	activeAction string
 	err          error
 	tools        []ai.Tool
 	dispatcher   func(*ai.ToolCall) (string, error)
@@ -217,9 +217,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ToolCallMsg:
 		m.status = "tool_execution"
+		actionStr := ai.FormatToolAction(msg.Call)
+		m.activeAction = actionStr
 		m.messages = append(m.messages, DisplayMessage{
 			Role:    "tool_call",
-			Content: fmt.Sprintf("⚙  Calling: %s", msg.Call.Name),
+			Content: fmt.Sprintf("  %s", actionStr),
 		})
 		m.updateViewport()
 
@@ -238,10 +240,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveMessage(resMsg)
 		m.messages = append(m.messages, DisplayMessage{
 			Role:    "tool_result",
-			Content: fmt.Sprintf("✔  %s → %s", msg.Name, truncate(msg.Result, 200)),
+			Content: fmt.Sprintf("  ✔ Done (%s)", truncate(msg.Result, 100)),
 		})
 		m.updateViewport()
 		m.status = "streaming"
+		m.activeAction = ""
 		messages := m.ctx.BuildFollowUp()
 		return m, streamCmd(m.groq, messages, m.tools)
 
@@ -349,7 +352,9 @@ func (m *Model) View() string {
 
 	if m.status != "idle" {
 		label := "Thinking"
-		if m.status == "tool_execution" {
+		if m.status == "tool_execution" && m.activeAction != "" {
+			label = m.activeAction
+		} else if m.status == "tool_execution" {
 			label = "Running tool"
 		}
 		fmt.Fprintf(&b, "%s\n", styleStatus.Render(fmt.Sprintf("  %s %s…", m.spinner.View(), label)))
@@ -365,6 +370,10 @@ func (m *Model) View() string {
 // shortModelName trims verbose model names for the status bar.
 func shortModelName(model string) string {
 	replacer := strings.NewReplacer(
+		"openai/gpt-oss-120b", "gpt-oss-120b",
+		"qwen/qwen3.6-27b", "qwen3.6-27b",
+		"openai/gpt-oss-20b", "gpt-oss-20b",
+		"llama-3.1-8b-instant", "llama3.1-8b",
 		"llama-3.3-70b-versatile", "llama3.3-70b",
 		"llama-3.1-70b-versatile", "llama3.1-70b",
 		"llama3-groq-70b-8192-tool-use-preview", "llama3-tool-70b",
