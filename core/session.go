@@ -100,8 +100,6 @@ func RunAskOnce(question string, store *memory.Store) error {
 	return nil
 }
 
-
-
 // HandleSlashCommand processes interactive slash commands like /search, /model, /history, /summary.
 func HandleSlashCommand(input string, session *memory.Session, store *memory.Store, r *renderer.Renderer, groq *ai.GroqClient) error {
 	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)

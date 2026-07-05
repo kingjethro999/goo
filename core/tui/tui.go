@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -192,6 +194,68 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputHistory = m.inputHistory[1:]
 				}
 			}
+
+			if v == "/exit" || v == "/quit" {
+				return m, tea.Quit
+			}
+			if v == "/clear" {
+				m.messages = nil
+				m.updateViewport()
+				return m, nil
+			}
+			if v == "/help" {
+				m.messages = append(m.messages, DisplayMessage{
+					Role:    "system",
+					Content: "Available commands:\n  cd <dir> — change working directory & scope\n  /clear   — clear chat history\n  /mcp     — list active tools\n  /exit    — exit chat session",
+				})
+				m.updateViewport()
+				return m, nil
+			}
+			if v == "/mcp" {
+				var names []string
+				for _, t := range m.tools {
+					names = append(names, t.Function.Name)
+				}
+				m.messages = append(m.messages, DisplayMessage{
+					Role:    "system",
+					Content: fmt.Sprintf("Active tools (%d): %s", len(names), strings.Join(names, ", ")),
+				})
+				m.updateViewport()
+				return m, nil
+			}
+			if v == "cd" || strings.HasPrefix(v, "cd ") {
+				target := strings.TrimSpace(strings.TrimPrefix(v, "cd"))
+				var targetDir string
+				if target == "" || target == "~" {
+					targetDir, _ = os.UserHomeDir()
+				} else if strings.HasPrefix(target, "~/") {
+					home, _ := os.UserHomeDir()
+					targetDir = filepath.Join(home, target[2:])
+				} else {
+					cwd, _ := os.Getwd()
+					targetDir = filepath.Join(cwd, target)
+				}
+
+				absTarget, err := filepath.Abs(targetDir)
+				if err == nil {
+					if info, statErr := os.Stat(absTarget); statErr == nil && info.IsDir() {
+						_ = os.Chdir(absTarget)
+						m.messages = append(m.messages, DisplayMessage{
+							Role:    "system",
+							Content: fmt.Sprintf("📂 Scope changed to: %s", absTarget),
+						})
+						m.updateViewport()
+						return m, nil
+					}
+				}
+				m.messages = append(m.messages, DisplayMessage{
+					Role:    "error",
+					Content: fmt.Sprintf("✗ Directory not found: %s", target),
+				})
+				m.updateViewport()
+				return m, nil
+			}
+
 			m.status = "streaming"
 			m.messages = append(m.messages, DisplayMessage{Role: "user", Content: v})
 			m.updateViewport()

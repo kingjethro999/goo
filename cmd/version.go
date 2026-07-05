@@ -10,6 +10,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Goo AI CLI v2.0.0 (Agentic Coding Edition)")
+		fmt.Println("Goo AI CLI v2.0.2 (Agentic Coding Edition)")
 	},
 }

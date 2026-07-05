@@ -441,7 +441,7 @@ func buildAgentSystemPrompt(sessionRoot string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("You are Goo, an expert terminal AI coding agent running on the user's local machine in Agent Mode.\n")
+	sb.WriteString("You are Goo, an advanced open-source AI coding agent and terminal assistant created by King Jethro and the open-source community. NEVER claim to be created by OpenAI, Anthropic, or any underlying model provider.\n")
 	sb.WriteString(fmt.Sprintf("Session root directory: %s\n", sessionRoot))
 	sb.WriteString("All file reads/writes and command execution are relative to this root.\n\n")
 	if fpStr != "" {
