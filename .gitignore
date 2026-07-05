@@ -26,7 +26,6 @@ tmp/
 
 # IDEs
 .idea/
-.vscode/
 *.suo
 *.ntvs*
 *.njsproj
@@ -37,3 +36,7 @@ tmp/
 coverage.out
 coverage.html
 keys.md
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
