@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kingjethro999/goo/skills"
 )
 
 // Skill represents a modular, reusable agent instruction recipe or slash command workflow.
@@ -18,7 +20,7 @@ type Skill struct {
 
 // LoadSkills scans both local project skills (.goo/skills, .claude/skills) and global user skills (~/.config/goo/skills).
 func LoadSkills(projectRoot string) ([]Skill, error) {
-	var skills []Skill
+	var skillsList []Skill
 	seen := make(map[string]bool)
 
 	// Directories to check for skills
@@ -34,7 +36,16 @@ func LoadSkills(projectRoot string) ([]Skill, error) {
 
 	home, err := os.UserHomeDir()
 	if err == nil {
-		searchDirs = append(searchDirs, filepath.Join(home, ".config", "goo", "skills"))
+		globalSkillsDir := filepath.Join(home, ".config", "goo", "skills")
+		_ = os.MkdirAll(globalSkillsDir, 0755)
+		// Auto-install built-in skills to global user directory if not already present
+		for fileName, content := range skills.GetBuiltinSkills() {
+			targetPath := filepath.Join(globalSkillsDir, fileName)
+			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+				_ = os.WriteFile(targetPath, []byte(content), 0644)
+			}
+		}
+		searchDirs = append(searchDirs, globalSkillsDir)
 	}
 
 	for _, dir := range searchDirs {
@@ -61,7 +72,7 @@ func LoadSkills(projectRoot string) ([]Skill, error) {
 			}
 
 			desc, trigger, body := parseSkillMarkdown(skillName, content)
-			skills = append(skills, Skill{
+			skillsList = append(skillsList, Skill{
 				Name:        skillName,
 				Description: desc,
 				Trigger:     trigger,
@@ -72,7 +83,24 @@ func LoadSkills(projectRoot string) ([]Skill, error) {
 		}
 	}
 
-	return skills, nil
+	// Fallback load directly from embedded builtin skills if not loaded from files
+	for fileName, content := range skills.GetBuiltinSkills() {
+		skillName := strings.TrimSuffix(fileName, ".md")
+		if seen[skillName] {
+			continue
+		}
+		desc, trigger, body := parseSkillMarkdown(skillName, content)
+		skillsList = append(skillsList, Skill{
+			Name:        skillName,
+			Description: desc,
+			Trigger:     trigger,
+			Path:        "builtin://" + fileName,
+			Prompt:      body,
+		})
+		seen[skillName] = true
+	}
+
+	return skillsList, nil
 }
 
 // parseSkillMarkdown extracts frontmatter or metadata headers from skill markdown files.

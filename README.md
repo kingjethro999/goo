@@ -1,6 +1,6 @@
 # Goo!!! YOUR CLI AI ASSISTANT
 
-> A terminal-first AI assistant built with Go. Not a chatbot wrapper — a **tool** powered by AI with persistent memory, task management, deep file search, GitHub integration, and live web search baked right in.
+> A terminal-first AI assistant built with Go. Not a chatbot wrapper — a professional-grade **agentic coding environment** powered by AI with Model Context Protocol (MCP) integration, parallel sub-agent orchestration, 3-tier safety gating, persistent memory, and task management baked right in.
 
 [![Go](https://github.com/kingjethro999/goo/actions/workflows/go.yml/badge.svg)](https://github.com/kingjethro999/goo/actions/workflows/go.yml)
 [![Release](https://img.shields.io/github/v/release/kingjethro999/goo)](https://github.com/kingjethro999/goo/releases)
@@ -13,10 +13,15 @@
 - [Features](#features)
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
+- [Model Context Protocol (MCP)](#model-context-protocol-mcp)
+- [Parallel Sub-Agent Orchestration](#parallel-sub-agent-orchestration)
+- [3-Tier Safety Policy](#3-tier-safety-policy)
 - [Agent Skills Engine](#agent-skills-engine)
 - [Commands](#commands)
   - [goo chat](#goo-chat)
   - [goo ask](#goo-ask)
+  - [goo agent](#goo-agent)
+  - [goo mcp](#goo-mcp)
   - [goo find](#goo-find)
   - [goo task](#goo-task)
   - [goo search](#goo-search)
@@ -35,12 +40,15 @@
 
 | Feature | Description |
 |---|---|
+| 📡 **Model Context Protocol (MCP)** | Seamlessly connect to external tools & data sources using standard JSON-RPC over `stdio` and `http` transports |
+| 🤖 **Parallel Sub-Agent Orchestration** | Decompose complex engineering tasks into non-overlapping file scopes executed concurrently by specialized sub-agents with automatic conflict merging |
+| 🛡 **3-Tier Safety Policy** | Professional-grade security gating (`always_confirm`, `allowlist_only`, `autonomous`) over file edits and terminal execution |
 | 🧠 **Persistent Memory** | Goo remembers your entire conversation history within and across sessions using SQLite |
 | 🔄 **Session Summarisation** | Long conversations are automatically summarised in the background so context is never lost |
-| 📡 **Real-Time Agent Feed** | Live action tracking & step-by-step reasoning feed (`Thought for 1s >`, `Analyzed 📄 file #L1-40`, `Run ⚡ go test`) |
+| 📊 **Real-Time Agent Feed** | Live action tracking & step-by-step reasoning feed (`Thought for 1s >`, `Analyzed 📄 file #L1-40`, `Run ⚡ go test`) |
 | 🎯 **Agent Skills Engine** | Modular slash commands & prompt recipes defined in `.goo/skills`, `.claude/skills`, or `~/.config/goo/skills` |
 | 💻 **Agentic Coding** | Read and edit files with precision line-scoped replacement, directory listing, and deep regex grep search |
-| 🛠 **Autonomous Tools** | The AI can call tools (file reading/writing, shell commands, grep, search, tasks, GitHub) on its own |
+| 🛠 **Autonomous Tools** | The AI can call tools (file reading/writing, shell commands, grep, search, tasks, GitHub, and MCP tools) on its own |
 | 🛡 **Git Safety Gating** | Automatic risk tier classification (Safe, Low, Moderate, High) with Git stash checkpoints for safe undos |
 | 📋 **Task Manager** | Fully offline SQLite-backed task manager the AI reads and writes to |
 | 🔍 **Deep File Search** | Scan your entire home directory to find any file, instantly |
@@ -59,7 +67,6 @@
 curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.sh | bash
 ```
 > **Note:** After installation, you may need to restart your terminal or refresh your path (e.g., `source ~/.bashrc` or `source ~/.zshrc`) for the `goo` command to be recognized.
-
 
 **Manual download:**
 Download the pre-built binary for your platform from the [Releases page](https://github.com/kingjethro999/goo/releases).
@@ -90,16 +97,76 @@ Get a free Groq key at: https://console.groq.com
 ```bash
 # Web search (required for goo search and AI web tool)
 goo config set-key tavily
-# Get a free Tavily key at: https://app.tavily.com
 
 # GitHub integration (required for goo gh)
 goo config set-key github
-# Create a token at: https://github.com/settings/tokens
 ```
 
 **Step 3 — Start chatting:**
 ```bash
 goo chat
+```
+
+---
+
+## Model Context Protocol (MCP)
+
+Goo natively supports the **Model Context Protocol (MCP)**, allowing you to connect external data sources, custom servers, and specialized toolboxes using JSON-RPC 2.0 over `stdio` or HTTP transports.
+
+### Configuring MCP Servers
+Add your MCP servers directly to `~/.config/goo/config.toml`:
+
+```toml
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+env = { NODE_ENV = "production" }
+enabled = true
+
+[mcp_servers.internal_api]
+url = "http://localhost:8080/mcp"
+headers = { Authorization = "Bearer ${API_KEY}" }
+enabled = true
+```
+
+Once configured, Goo automatically discovers and registers all tools exposed by connected MCP servers, making them available to the AI agent during interactive chat and parallel orchestration.
+
+---
+
+## Parallel Sub-Agent Orchestration
+
+Goo features an advanced orchestration engine capable of breaking down complex goals into parallel, non-overlapping sub-tasks.
+
+### How It Works
+1. **Goal Decomposition**: The Lead Agent analyzes your objective and decomposes it into independent sub-tasks, assigning precise file scopes (`Scope: ["internal/auth/*.go"]`) to prevent race conditions.
+2. **Bounded Execution**: Sub-agents execute concurrently within a bounded semaphore pool (`max_parallel_agents = 4`).
+3. **Scope Narrowing**: Each sub-agent is gated by a narrowed safety policy that blocks file modifications outside its assigned scope.
+4. **Conflict Merging**: Once sub-agents complete, the orchestrator detects concurrent modifications, flags file-level conflicts, and aggregates results into a clean unified diff.
+
+```bash
+# Run orchestration on a goal directly
+goo agent run "Refactor logging across auth and api packages to use slog"
+
+# Run from a structured tasks file
+goo agent run --tasks tasks.yaml
+```
+
+---
+
+## 3-Tier Safety Policy
+
+To ensure you stay in complete control of what ships, Goo implements a strict 3-tier safety policy configurable via `~/.config/goo/config.toml` or `goo config`:
+
+| Policy Mode | Behavior |
+|---|---|
+| `always_confirm` *(Default)* | Every file modification and bash command prompts for interactive user confirmation in the TUI before execution. |
+| `allowlist_only` | Safe commands matching glob patterns in `allowlist` (e.g., `git status`, `npm test`, `write_file`) auto-execute; anything else prompts for confirmation. |
+| `autonomous` | Full agentic mode. The AI can execute tools, edit files, and run commands autonomously without interrupting for approval. |
+
+```toml
+[agent]
+safety_policy = "always_confirm"
+allowlist = ["npm install", "npm run *", "git add", "git status", "git diff", "write_file"]
 ```
 
 ---
@@ -131,163 +198,91 @@ When performing a code review:
 3. Suggest performance optimizations without breaking existing tests.
 ```
 
-### Automatic Discovery & Execution
-- **On Every Session Start**: Goo automatically aggregates all discovered skills into the AI agent's system prompt.
-- **AI Awareness**: The AI is immediately aware of your skills and can follow their instructions automatically whenever relevant.
-- **Slash Triggers**: Skills defining a `trigger:` (e.g. `/review` or `/test`) can be invoked inside the chat interface.
-
 ---
 
 ## Commands
 
 ### `goo chat`
-
 Opens the interactive AI chat TUI. Features real-time streaming, a scrollable viewport, multiline input, and autonomous tool use.
-
 ```bash
 goo chat
 ```
 
-**Inside the chat:**
-| Key | Action |
-|---|---|
-| `Enter` | Send message |
-| `Alt+Enter` | Insert newline (multiline input) |
-| `Ctrl+C` | Quit |
-
-The AI can call tools automatically during a chat session. When it does, you will see a status indicator like `⚙ Calling tool: search_web...` and the result is injected back into the conversation seamlessly.
-
----
-
 ### `goo ask`
-
 Ask a single question and get a response without entering the full TUI. Ideal for one-shot terminal queries.
-
 ```bash
 goo ask "what is the capital of Nigeria?"
 goo ask "summarise the last git commit in this folder"
-goo ask what time is it in Tokyo right now
 ```
 
----
+### `goo agent`
+Manage and execute parallel sub-agent orchestration.
+```bash
+# Decompose and run parallel sub-agents for a goal
+goo agent run "Add unit tests for all handlers in internal/api"
+
+# Inspect active and historical sub-agent status
+goo agent status
+
+# Stop a running sub-agent or all active agents
+goo agent stop --all
+```
+
+### `goo mcp`
+Manage and inspect configured Model Context Protocol (MCP) servers.
+```bash
+# List all configured servers, transport types, and exposed tools
+goo mcp list
+
+# Check connection health status of MCP servers
+goo mcp status
+```
 
 ### `goo find`
-
-**Goo Find** — an extensive deep search across your home directory to find any file or folder, no matter how deep or misplaced.
-
+An extensive deep search across your home directory to find any file or folder, no matter how deep or misplaced.
 ```bash
-goo find [query]
-```
-
-**Examples:**
-```bash
-goo find my resume
 goo find invoice march
 goo find config.toml
-goo find notes from meeting
 ```
 
-**How it works:**
-- Scans your entire `$HOME` directory recursively
-- Skips heavy system/dev folders (`.git`, `node_modules`, `vendor`, `.cache`) for speed
-- Uses a heuristic scoring system: files with names matching all keywords score highest, with bonus points for exact matches
-- Returns the top 10 matches with path highlighting
-- Shows total items scanned and time taken
-
----
-
 ### `goo task`
-
 A fully offline, SQLite-backed task manager. The AI can read and modify your tasks autonomously during chat.
-
 ```bash
-# Add a task
-goo task add "Finish the project report"
-goo task add "Buy groceries" --priority high
-
-# List all open tasks
+goo task add "Finish the project report" --priority high
 goo task list
-
-# Mark a task as done (use the ID shown in list)
 goo task done 3
 ```
 
-**Priority levels:** `low`, `medium` (default), `high`
-
-The AI is aware of your open tasks during every chat session and can:
-- Add tasks on your behalf ("remind me to call back John")
-- List your current tasks when asked
-- Mark tasks complete when you say you're done with something
-
----
-
 ### `goo search`
-
 Perform a real-time web search using the Tavily API, returning an AI-summarized answer directly in the terminal.
-
 ```bash
 goo search "latest AI news"
-goo search "how to reverse a string in Go"
-goo search "Nigeria tech ecosystem 2025"
 ```
 
-**Requires:** `tavily` API key set via `goo config set-key tavily`
-
----
-
 ### `goo gh`
-
 GitHub integration commands. Requires a GitHub personal access token set via `goo config set-key github`.
-
 ```bash
-# List your open pull requests
 goo gh prs
-
-# View your contribution stats
 goo gh stats
 ```
 
-Create a GitHub token at: https://github.com/settings/tokens (only `repo` and `read:user` scopes needed)
-
----
-
 ### `goo history`
-
 Browse and resume past conversation sessions.
-
 ```bash
-# List all past sessions
 goo history list
-
-# Show messages from a specific session
 goo history show [session-id]
-
-# Resume a past session
 goo history resume [session-id]
 ```
 
----
-
 ### `goo config`
-
 Manage your Goo configuration and API keys.
-
 ```bash
-# Store an API key (encrypted)
 goo config set-key groq
-goo config set-key tavily
-goo config set-key github
-
-# List all stored key slots (names only, not values)
 goo config list-keys
 ```
 
----
-
 ### `goo version`
-
 Prints the current version, commit hash, and build date.
-
 ```bash
 goo version
 ```
@@ -304,16 +299,6 @@ Goo uses a **passphrase-based encrypted keystore** to protect your API keys.
 3. Each key is encrypted with `AES-256-GCM` (authenticated encryption) and stored at `~/.config/goo/keys.enc`
 4. **Your passphrase is never saved anywhere** — it only lives in memory for the duration of the current command
 
-**If you forget your passphrase:**
-There is no recovery mechanism. This is by design. To reset:
-```bash
-rm ~/.config/goo/salt ~/.config/goo/keys.enc
-# Then re-run: goo config set-key groq
-```
-
-**Fallback keys:**
-Goo ships with built-in developer keys as a fallback for users who haven't set up their own keys yet. Once you set your own key for a given slot, it always takes priority over the fallback.
-
 ---
 
 ## API Keys
@@ -329,17 +314,8 @@ Goo ships with built-in developer keys as a fallback for users who haven't set u
 ## How Memory Works
 
 Goo uses a two-layer memory system backed by SQLite (`~/.config/goo/tasks.db`):
-
 1. **Full session history** — every message in a session is stored and included in each request (up to token budget)
-2. **Auto-summarisation** — every 40 messages, the older portion of the conversation is automatically summarised by a fast model (`llama-3.1-8b-instant`) in the background. The summary is injected as context at the start of future requests so nothing is lost, even in very long sessions
-
-**Context files:**
-| Path | Contents |
-|---|---|
-| `~/.config/goo/tasks.db` | All sessions, messages, tasks |
-| `~/.config/goo/keys.enc` | Encrypted API keys |
-| `~/.config/goo/salt` | Argon2 salt for key derivation |
-| `~/.config/goo/config.toml` | App configuration |
+2. **Auto-summarisation** — every 40 messages, the older portion of the conversation is automatically summarised by a fast model in the background. The summary is injected as context at the start of future requests so nothing is lost, even in very long sessions.
 
 ---
 
@@ -353,18 +329,11 @@ cd goo
 
 # Build binary
 make build
-# Binary is at bin/goo
 
 # Run tests
 make test
-
-# Generate man page
-make man
-
-# Install man page to system
-make install-man
 ```
 
 ---
 
-*Goo AI CLI — v1.0 · Built with Go, Bubbletea, SQLite, and Groq*
+*Goo AI CLI — v2.0.1 · Built with Go, Bubbletea, SQLite, MCP, and Groq*

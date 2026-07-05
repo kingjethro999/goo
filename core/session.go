@@ -38,8 +38,12 @@ func RunChatSession(session *memory.Session, store *memory.Store) error {
 		return ExecuteToolCall(call, toolDeps)
 	}
 
+	mcpTools, _ := GlobalMCPHub.LoadAndInitialize(".")
+	allActiveTools := append([]ai.Tool{}, AllTools...)
+	allActiveTools = append(allActiveTools, mcpTools...)
+
 	p := tea.NewProgram(
-		tui.New(session, store, groqClient, AllTools, dispatcher),
+		tui.New(session, store, groqClient, allActiveTools, dispatcher),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

@@ -14,6 +14,8 @@ var (
 	chatDir   string
 	chatUndo  bool
 	chatImage string
+	chatTUI   bool
+	chatCLI   bool
 )
 
 var chatCmd = &cobra.Command{
@@ -45,6 +47,9 @@ var chatCmd = &cobra.Command{
 		}
 
 		initialInstruction := strings.Join(args, " ")
+		if chatTUI || (initialInstruction == "" && !chatCLI && chatImage == "") {
+			return core.RunChatSession(session, store)
+		}
 		return core.RunAgentSession(session, store, initialInstruction, targetDir, chatImage)
 	},
 }
@@ -53,4 +58,6 @@ func init() {
 	chatCmd.Flags().StringVarP(&chatDir, "dir", "d", "", "Scope session to this directory")
 	chatCmd.Flags().BoolVar(&chatUndo, "undo", false, "Undo the last agent action session")
 	chatCmd.Flags().StringVarP(&chatImage, "image", "i", "", "Attach image for visual debugging (local path or URL)")
+	chatCmd.Flags().BoolVar(&chatTUI, "tui", false, "Launch interactive Bubbletea TUI chat interface")
+	chatCmd.Flags().BoolVar(&chatCLI, "cli", false, "Force command-line interface mode when starting without initial instructions")
 }

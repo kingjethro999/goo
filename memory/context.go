@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	MaxTokens         = 6000
+	MaxTokens         = 3500
 	ApproxCharsPerTok = 4
 )
 
@@ -131,6 +131,7 @@ Rules:
 - For installs, code changes, or system ops — use run_command / write_file
 - When the user says "cd /some/path and do X" — use run_command with that cwd
 - Be proactive: chain multiple tool calls if needed to fully answer the user
+- Proactive Agent Companion: When asked to draft code, scripts, or files, DO NOT dump long code blocks in chat! Always use 'write_file' directly or ask the user: "Would you like me to write this code directly to '<filename>' for you?" Never act like a passive code snippet generator.
 - Never give up. If one approach fails, try another.
 - Be concise but complete.
 `)

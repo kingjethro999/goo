@@ -238,8 +238,8 @@ func (c *GroqClient) streamChatInternal(ctx context.Context, messages []memory.M
 	}
 
 	maxTok := config.GetInt("ai.max_tokens")
-	if maxTok == 0 {
-		maxTok = 4096
+	if maxTok == 0 || maxTok > 2048 {
+		maxTok = 2048
 	}
 
 	modelToUse := c.model
@@ -391,8 +391,8 @@ func (c *GroqClient) streamChatClaude(ctx context.Context, messages []memory.Mes
 	}
 
 	maxTok := config.GetInt("ai.max_tokens")
-	if maxTok == 0 {
-		maxTok = 4096
+	if maxTok == 0 || maxTok > 2048 {
+		maxTok = 2048
 	}
 
 	payload := map[string]interface{}{

@@ -9,6 +9,18 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+type MCPServerConf struct {
+	Name         string            `toml:"name"`
+	Transport    string            `toml:"transport"`
+	Command      string            `toml:"command"`
+	Args         []string          `toml:"args"`
+	Env          map[string]string `toml:"env"`
+	URL          string            `toml:"url"`
+	Headers      map[string]string `toml:"headers"`
+	Enabled      bool              `toml:"enabled"`
+	SafetyPolicy string            `toml:"safety_policy"`
+}
+
 // Schema mirrors config.toml structure
 type Schema struct {
 	General struct {
@@ -40,6 +52,10 @@ type Schema struct {
 		SafetyPolicy string   `toml:"safety_policy"`
 		Allowlist    []string `toml:"allowlist"`
 	} `toml:"agent"`
+	Orchestration struct {
+		MaxParallelAgents int `toml:"max_parallel_agents"`
+	} `toml:"orchestration"`
+	MCPServers map[string]MCPServerConf `toml:"mcp_servers"`
 }
 
 var (
@@ -138,6 +154,8 @@ func GetInt(key string) int {
 		return cfg.AI.MaxTokens
 	case "search.max_results":
 		return cfg.Search.MaxResults
+	case "orchestration.max_parallel_agents":
+		return cfg.Orchestration.MaxParallelAgents
 	}
 	return 0
 }
@@ -184,7 +202,7 @@ func defaultConfig() Schema {
 	c.General.HistoryLimit = 50
 	c.General.AutoFollowup = true
 	c.General.Stream = true
-	c.AI.MaxTokens = 4096
+	c.AI.MaxTokens = 2048
 	c.AI.Temperature = 0.7
 	c.Tasks.StoragePath = filepath.Join(GooConfigDir(), "tasks.db")
 	c.Tasks.DefaultPriority = "medium"
@@ -192,6 +210,8 @@ func defaultConfig() Schema {
 	c.Search.SearchDepth = "basic"
 	c.Agent.SafetyPolicy = "always_confirm"
 	c.Agent.Allowlist = []string{"npm install", "npm run *", "git add", "git status", "git diff", "write_file"}
+	c.Orchestration.MaxParallelAgents = 4
+	c.MCPServers = make(map[string]MCPServerConf)
 	return c
 }
 
@@ -219,4 +239,22 @@ func SetAgentAllowlist(list []string) error {
 	defer cfgMu.Unlock()
 	cfg.Agent.Allowlist = list
 	return writeConfig(DefaultConfigPath(), cfg)
+}
+
+func GetMCPServers() []MCPServerConf {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	var out []MCPServerConf
+	for name, conf := range cfg.MCPServers {
+		conf.Name = name
+		if conf.Transport == "" {
+			if conf.URL != "" {
+				conf.Transport = "http"
+			} else {
+				conf.Transport = "stdio"
+			}
+		}
+		out = append(out, conf)
+	}
+	return out
 }

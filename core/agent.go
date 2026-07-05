@@ -470,6 +470,7 @@ func buildAgentSystemPrompt(sessionRoot string) string {
 4. DO NOT USE ANY EMOJIS in your output text or step summaries. Use simple text markers (✓, ✗, ⏳, ✎, ?) instead.
 5. If a command fails or a file edit fails, re-plan and try another approach. Do not repeat the same failing action without changing the arguments.
 6. When the user's task is fully complete, report back a summary of what you did.
+7. PROACTIVE AGENT COMPANION: You are an active AI pair programmer and coding companion, NOT a passive code snippet generator. When the user asks you to draft a script, create a file, write a config, or modify code, DO NOT just dump long code blocks in your chat response! Instead, ALWAYS either use 'write_file' directly to save the code to the filesystem, OR explicitly ask the user: "Would you like me to write this code directly to '<filename>' for you?" Never leave the user to manually copy and paste code from terminal snippets.
 `)
 	return sb.String()
 }
@@ -493,6 +494,18 @@ func buildAgentMessages(session *memory.Session, store *memory.Store, userInput 
 	return messages
 }
 
+type cleanStdoutWriter struct {
+	cleared *bool
+}
+
+func (cw *cleanStdoutWriter) Write(p []byte) (int, error) {
+	if !*cw.cleared && len(p) > 0 {
+		fmt.Printf("\r\033[K")
+		*cw.cleared = true
+	}
+	return os.Stdout.Write(p)
+}
+
 func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqClient, userInput string, sessionRoot string, sessLog *SessionLog, tools []ai.Tool, imageURL string) error {
 	if userInput != "" {
 		msg := memory.Message{Role: "user", Content: userInput, ImageURL: imageURL, SessionID: session.ID}
@@ -504,7 +517,8 @@ func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqCli
 		messages := buildAgentMessages(session, store, "", sessionRoot)
 
 		turnStart := time.Now()
-		fmt.Printf("\n✦ Thinking...\n")
+		_ = turnStart
+		fmt.Printf("\r\033[K✦ Thinking...")
 
 		opts := ai.StreamOptions{}
 		if turnCount == 0 {
@@ -520,14 +534,12 @@ func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqCli
 		}
 
 		var textBuf strings.Builder
-		toolCall, err := groq.StreamChatWithToolsEx(context.Background(), messages, io.MultiWriter(os.Stdout, &textBuf), tools, opts)
+		cleared := false
+		cw := &cleanStdoutWriter{cleared: &cleared}
+		toolCall, err := groq.StreamChatWithToolsEx(context.Background(), messages, io.MultiWriter(cw, &textBuf), tools, opts)
 		if err != nil {
+			fmt.Printf("\r\033[K")
 			return err
-		}
-
-		thoughtDur := time.Since(turnStart).Round(100 * time.Millisecond)
-		if thoughtDur > 0 {
-			fmt.Printf("  Thought for %v >\n", thoughtDur)
 		}
 
 		assistantMsgContent := textBuf.String()
@@ -536,6 +548,9 @@ func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqCli
 		}
 
 		if toolCall == nil {
+			if !cleared {
+				fmt.Printf("\r\033[K")
+			}
 			if assistantMsgContent != "" {
 				_ = store.SaveMessage(memory.Message{Role: "assistant", Content: assistantMsgContent, SessionID: session.ID})
 			}
@@ -543,9 +558,12 @@ func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqCli
 		}
 
 		actionDesc := ai.FormatToolAction(toolCall)
-		fmt.Printf("  %s\n", actionDesc)
+		fmt.Printf("\r\033[K✦ %s...", actionDesc)
 
 		tier := classifyToolCall(toolCall, sessionRoot)
+		if tier != TierSafe {
+			fmt.Printf("\r\033[K")
+		}
 		approved, editedArgs, err := gateToolCall(toolCall, tier)
 		if err != nil {
 			return err
@@ -630,10 +648,10 @@ func runAgentLoop(session *memory.Session, store *memory.Store, groq *ai.GroqCli
 		if err != nil {
 			success = false
 			errorMsg = err.Error()
-			fmt.Printf("✗ Failed in %v: %v\n\n", duration.Round(time.Millisecond), err)
+			fmt.Printf("\r\033[K✗ Failed in %v: %v\n", duration.Round(time.Millisecond), err)
 		} else {
 			success = true
-			fmt.Printf("✓ Done in %v\n\n", duration.Round(time.Millisecond))
+			fmt.Printf("\r\033[K✦ Working...")
 		}
 
 		if success {
@@ -846,7 +864,7 @@ func gateToolCall(call *ai.ToolCall, tier RiskTier) (approved bool, editedArgs j
 
 	if policy == "allowlist" {
 		if checkAllowlist(call) {
-			fmt.Printf("✓ Auto-running allowlisted operation: %s\n", call.Name)
+			fmt.Printf("\r\033[K✦ Auto-running %s...", call.Name)
 			return true, nil, nil
 		}
 	}
@@ -1048,8 +1066,12 @@ func printFinalSummary(log *SessionLog) {
 		}
 	}
 
+	if len(created) == 0 && len(modified) == 0 && len(ran) == 0 {
+		return
+	}
+
 	fmt.Println("\nSummary")
-	fmt.Printf("  Steps executed: %d\n", len(log.Steps))
+	fmt.Printf("  Actions performed: %d\n", len(created)+len(modified)+len(ran))
 
 	if len(created) > 0 {
 		fmt.Println("\n  Created")
