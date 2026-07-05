@@ -62,11 +62,21 @@
 
 ## Installation
 
-**Via install script (Linux/macOS):**
+**macOS, Linux, WSL:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.sh | bash
 ```
-> **Note:** After installation, you may need to restart your terminal or refresh your path (e.g., `source ~/.bashrc` or `source ~/.zshrc`) for the `goo` command to be recognized.
+> **Note:** After installation, refresh your shell (`source ~/.bashrc` or `source ~/.zshrc`) or restart your terminal.
+
+**Windows PowerShell:**
+```powershell
+irm https://raw.githubusercontent.com/kingjethro999/goo/main/install.ps1 | iex
+```
+
+**Windows CMD:**
+```batch
+curl -fsSL https://raw.githubusercontent.com/kingjethro999/goo/main/install.cmd -o install.cmd && install.cmd && del install.cmd
+```
 
 **Manual download:**
 Download the pre-built binary for your platform from the [Releases page](https://github.com/kingjethro999/goo/releases).
